@@ -1,17 +1,21 @@
 # =============================================================================
-# Test build of the BFBC2 game server image.
+# Test build of the BFBC2 game server image (version 2, with diagnostics).
 #
 # - Runs only when you click "Run workflow" in the Actions tab.
 # - Nothing is published anywhere.
 #
-# What it proves, step by step:
-#   1. The image (Wine + fake screen + Windows libraries) builds.
-#   2. The server pack downloads, passes its SHA256 check and unpacks.
-#   3. One game server starts under Wine.
-#   4. The server opens its remote-admin (RCON) port.
+# What it does:
+#   1. Builds the image (Wine + fake screen + Windows libraries).
+#   2. Downloads, verifies and unpacks the server pack.
+#   3. Starts TWO game servers at the same time, in two containers:
+#        A: the pack's own Instance/       (RCON setting: bare port 48888)
+#        B: the pack's own Instance_conq/  (RCON setting: 0.0.0.0:48889)
+#      Two reasons: we compare the two RCON port formats, and it is a first
+#      check that several servers can run side by side.
+#   4. Prints lots of diagnostics, pass or fail.
 #
-# It does NOT start the master server yet. The game server will try to reach
-# a master on 127.0.0.1 and keep retrying. That is expected for this test.
+# It does NOT start the master server yet. The servers will try to reach a
+# master on 127.0.0.1 and keep retrying. That is expected for this test.
 # =============================================================================
 name: test-game-build
 
@@ -62,12 +66,14 @@ jobs:
             bfbc2-game:test fetch-pack
           ls -la data/pack | head -40
 
-      # Same launch command the original "Start ALL 8 Server.bat" uses, but
-      # for one server, on Linux: Wine inside a fake screen (xvfb-run).
-      # "--net=host" because these servers need host networking.
-      - name: Start one game server
+      # Same launch command as the original "Start ALL 8 Server.bat", for one
+      # server, on Linux: Wine inside a fake screen (xvfb-run).
+      # WINEDEBUG adds a trace of which Windows libraries get loaded. It shows
+      # how far the program gets. Errors are printed too.
+      - name: Start server A (Instance/, RCON bare port 48888)
         run: |
-          docker run -d --name bc2-game --net=host --user 1000:1000 \
+          docker run -d --name bc2-a --net=host --user 1000:1000 \
+            -e WINEDEBUG=err+all,fixme-all,+loaddll \
             -v "$PWD/data:/data" -w /data/pack \
             bfbc2-game:test \
             xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1024x24" \
@@ -78,33 +84,69 @@ jobs:
               -region OC \
               -heartBeatInterval 20000
 
-      # The pack's Instance/ServerOptions.ini sets RemoteAdminPort=48888.
-      # We check for up to 2 minutes whether that port opens.
-      - name: Wait for the RCON port
+      # Give server B its own ports. Its RCON setting uses the "ip:port"
+      # format (the format the community Docker image writes).
+      # sudo is needed because the pack files belong to user 1000.
+      - name: Prepare server B settings (Instance_conq/)
         run: |
-          for i in $(seq 1 60); do
-            if (echo > /dev/tcp/127.0.0.1/48888) 2>/dev/null; then
-              echo "RCON port 48888 is open (after about $((i*2)) seconds)"
+          f=data/pack/Instance_conq/ServerOptions.ini
+          echo "--------- before"; cat "$f"; echo
+          sudo sed -i \
+            -e 's/^Port=.*/Port=19568/' \
+            -e 's/^RemoteAdminPort=.*/RemoteAdminPort=0.0.0.0:48889/' \
+            "$f"
+          echo "--------- after"; cat "$f"; echo
+
+      - name: Start server B (Instance_conq/, RCON 0.0.0.0:48889)
+        run: |
+          docker run -d --name bc2-b --net=host --user 1000:1000 \
+            -e WINEDEBUG=err+all,fixme-all,+loaddll \
+            -v "$PWD/data:/data" -w /data/pack \
+            bfbc2-game:test \
+            xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1024x24" \
+            wine Frost.Game.Main_Win32_Final.exe \
+              -serverInstancePath Instance_conq/ \
+              -mapPack2Enabled 1 \
+              -timeStampLogNames \
+              -region OC \
+              -heartBeatInterval 20000
+
+      # Wait up to 90 seconds for either RCON port to open. When one opens,
+      # wait 10 more seconds and report both.
+      - name: Wait for the RCON ports
+        run: |
+          probe() { (echo > /dev/tcp/127.0.0.1/"$1") 2>/dev/null && echo yes || echo no; }
+          for i in $(seq 1 45); do
+            if [ "$(probe 48888)" = yes ] || [ "$(probe 48889)" = yes ]; then
+              sleep 10
+              echo "after about $((i*2+10)) seconds:"
+              echo "  server A (bare port 48888):   open = $(probe 48888)"
+              echo "  server B (0.0.0.0:48889):     open = $(probe 48889)"
               exit 0
-            fi
-            if ! docker ps -q -f name=bc2-game | grep -q .; then
-              echo "The container exited before the port opened"
-              exit 1
             fi
             sleep 2
           done
-          echo "The RCON port never opened"
+          echo "Neither RCON port opened within 90 seconds"
           exit 1
 
-      # Always print what the server said, pass or fail. This is the most
-      # useful part if something goes wrong.
-      - name: Show logs
+      # Always print everything we can, pass or fail.
+      - name: Diagnostics
         if: always()
         run: |
-          echo "=================== container output (last 80 lines)"
-          docker logs bc2-game 2>&1 | tail -n 80 || true
-          echo "=================== files in Instance/"
-          ls -la data/pack/Instance | head -40 || true
-          echo "=================== newest server log (last 60 lines)"
-          f=$(ls -t data/pack/Instance/RuntimeLog_* 2>/dev/null | head -1 || true)
-          if [ -n "${f}" ]; then tail -n 60 "${f}"; else echo "(no RuntimeLog file found)"; fi
+          for c in bc2-a bc2-b; do
+            echo "=================== ${c}: state"
+            docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' "${c}" || true
+            echo "--------- processes inside ${c}"
+            docker top "${c}" -eo pid,stat,pcpu,etime,args || true
+            echo "--------- output of ${c} (last 150 lines)"
+            docker logs --tail 150 "${c}" 2>&1 || true
+          done
+          echo "=================== listening ports on the runner"
+          sudo ss -tulnp | head -40 || true
+          echo "=================== files created or changed since unpacking"
+          find data/pack -newer data/pack/.pack-sha256 -type f | head -50 || true
+          for d in Instance Instance_conq; do
+            echo "=================== newest server log in ${d}/ (last 60 lines)"
+            f=$(ls -t data/pack/${d}/RuntimeLog_* 2>/dev/null | head -1 || true)
+            if [ -n "${f}" ]; then tail -n 60 "${f}"; else echo "(no RuntimeLog file)"; fi
+          done
