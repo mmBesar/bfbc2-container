@@ -1,0 +1,110 @@
+# =============================================================================
+# Test build of the BFBC2 game server image.
+#
+# - Runs only when you click "Run workflow" in the Actions tab.
+# - Nothing is published anywhere.
+#
+# What it proves, step by step:
+#   1. The image (Wine + fake screen + Windows libraries) builds.
+#   2. The server pack downloads, passes its SHA256 check and unpacks.
+#   3. One game server starts under Wine.
+#   4. The server opens its remote-admin (RCON) port.
+#
+# It does NOT start the master server yet. The game server will try to reach
+# a master on 127.0.0.1 and keep retrying. That is expected for this test.
+# =============================================================================
+name: test-game-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # SHA256 of Bc2emu_V09.rar (the server pack from SourceForge).
+  PACK_SHA256: "d1b25860f23af15cbab6549d41840836056ab38a49357eb3064a7d00f6d9f04b"
+
+jobs:
+  game:
+    # Native amd64 runner. Wine + the 32-bit game server are amd64 only.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # "load: true" keeps the image on the runner so we can test it.
+      # "push: false" means it is NOT uploaded to any registry.
+      # The cache makes repeat runs much faster (the Wine setup is slow).
+      - name: Build the game image (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: ./game
+          load: true
+          push: false
+          tags: bfbc2-game:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Uses the image's own helper to download + verify + unpack the pack
+      # into ./data/pack on the runner.
+      - name: Fetch the server pack
+        run: |
+          mkdir -p data
+          chmod 777 data
+          docker run --rm --user 1000:1000 \
+            -v "$PWD/data:/data" \
+            -e PACK_SHA256="${PACK_SHA256}" \
+            bfbc2-game:test fetch-pack
+          ls -la data/pack | head -40
+
+      # Same launch command the original "Start ALL 8 Server.bat" uses, but
+      # for one server, on Linux: Wine inside a fake screen (xvfb-run).
+      # "--net=host" because these servers need host networking.
+      - name: Start one game server
+        run: |
+          docker run -d --name bc2-game --net=host --user 1000:1000 \
+            -v "$PWD/data:/data" -w /data/pack \
+            bfbc2-game:test \
+            xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1024x24" \
+            wine Frost.Game.Main_Win32_Final.exe \
+              -serverInstancePath Instance/ \
+              -mapPack2Enabled 1 \
+              -timeStampLogNames \
+              -region OC \
+              -heartBeatInterval 20000
+
+      # The pack's Instance/ServerOptions.ini sets RemoteAdminPort=48888.
+      # We check for up to 2 minutes whether that port opens.
+      - name: Wait for the RCON port
+        run: |
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/48888) 2>/dev/null; then
+              echo "RCON port 48888 is open (after about $((i*2)) seconds)"
+              exit 0
+            fi
+            if ! docker ps -q -f name=bc2-game | grep -q .; then
+              echo "The container exited before the port opened"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "The RCON port never opened"
+          exit 1
+
+      # Always print what the server said, pass or fail. This is the most
+      # useful part if something goes wrong.
+      - name: Show logs
+        if: always()
+        run: |
+          echo "=================== container output (last 80 lines)"
+          docker logs bc2-game 2>&1 | tail -n 80 || true
+          echo "=================== files in Instance/"
+          ls -la data/pack/Instance | head -40 || true
+          echo "=================== newest server log (last 60 lines)"
+          f=$(ls -t data/pack/Instance/RuntimeLog_* 2>/dev/null | head -1 || true)
+          if [ -n "${f}" ]; then tail -n 60 "${f}"; else echo "(no RuntimeLog file found)"; fi
