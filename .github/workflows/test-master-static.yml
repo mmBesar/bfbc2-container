@@ -1,0 +1,76 @@
+# =============================================================================
+# Test: is the master server program fully static, and does it run in plain
+# Debian (the base of the all-in-one image)?
+#
+# - Runs only when you click "Run workflow" in the Actions tab.
+# - Nothing is published anywhere.
+#
+# Why this matters: the master was built on Alpine Linux, so it normally needs
+# Alpine's own system libraries. The all-in-one image is Debian-based (for
+# Wine). A fully static program has no such dependency and runs anywhere.
+#
+# The Dockerfile itself already fails the build if the program is not static.
+# This workflow then copies the program out and runs it in a plain Debian
+# container to prove it.
+# =============================================================================
+name: test-master-static
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # SHA256 of src_v09.rar (master server source code).
+  SRC_SHA256: "a3e180526ac71af639e73c5ee33ea98c55ddae48d0e81aea2621070b0272031c"
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # "load: true" keeps the image on the runner so we can test it.
+      # "push: false" means it is NOT uploaded to any registry.
+      - name: Build the master image (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: ./master
+          load: true
+          push: false
+          tags: bfbc2-master:test
+          build-args: |
+            SRC_SHA256=${{ env.SRC_SHA256 }}
+          cache-from: type=gha,scope=master
+          cache-to: type=gha,scope=master,mode=max
+
+      - name: Copy the program out of the image
+        run: |
+          id=$(docker create bfbc2-master:test)
+          docker cp "${id}:/opt/mase/mase_bc2" ./mase_bc2
+          docker rm "${id}"
+          chmod 755 mase_bc2
+          ls -la mase_bc2
+          echo "--------- file"
+          file mase_bc2
+          echo "--------- ldd (a static program has no libraries to list)"
+          ldd mase_bc2 || true
+
+      # With no config.ini in its folder, the program prints an error and
+      # exits. That is fine: it proves the program itself starts in Debian.
+      # If it were not static, Docker would say "no such file or directory".
+      - name: Run it inside plain Debian
+        run: |
+          out=$(timeout 10 docker run --rm \
+                  -v "$PWD/mase_bc2:/opt/mase_bc2:ro" \
+                  debian:bookworm-slim /opt/mase_bc2 2>&1 || true)
+          echo "${out}"
+          echo "${out}" | grep -q "Failed to load config.ini" \
+            || { echo "FAIL: the program did not start in Debian"; exit 1; }
+          echo "OK: the program runs in plain Debian"
+          

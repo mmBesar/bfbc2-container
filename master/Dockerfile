@@ -45,13 +45,17 @@ WORKDIR /bfbc2/src
 
 # The project files point at the original author's own library folders.
 # Point them at the ones in our build image (stage 2) instead.
+# Also link the program fully STATIC (-static), so it carries everything it
+# needs and can later run inside the Debian-based all-in-one image (a program
+# built on Alpine normally needs Alpine's own system libraries).
 RUN sed -i -e 's@$(BOOST_1_54_DIR)@'${LIB_BOOST_DIR}'@g' mase_bc2.vcxproj mase_bc2.cbp \
  && sed -i -e 's@$(OPEN_SSL_DIR)@'${LIB_OPENSSL_DIR}'@g' mase_bc2.vcxproj mase_bc2.cbp \
  && for lib in libboost_system libboost_filesystem libboost_random libssl libcrypto; do \
       sed -i -e "s@${lib}.a@${LIB_PATH}/${lib}.a@g" mase_bc2.cbp; \
     done \
  && cbp2make -in mase_bc2.cbp -out Makefile \
- && sed -i -e '/^LIB = / s@$@ -lz@' Makefile
+ && sed -i -e '/^LIB = / s@$@ -lz@' Makefile \
+ && sed -i -e '/^LDFLAGS = / s@$@ -static@' Makefile
 
 
 # ---- Stage 2: compile --------------------------------------------------------
@@ -63,19 +67,25 @@ FROM alpine:3.8 AS build
 
 ENV CXXFLAGS="-std=gnu++11"
 
-RUN apk add --no-cache bash make gcc g++ boost-dev openssl-dev
+RUN apk add --no-cache bash make gcc g++ boost-dev openssl-dev zlib-dev
 
 COPY --from=source /bfbc2 /bfbc2
 WORKDIR /bfbc2/src
 RUN make release
 
+# Safety check: the finished program must be fully static (needs no shared
+# libraries). If it is not, stop the build here with a clear message.
+RUN if readelf -d bin/Release/mase_bc2 | grep -q NEEDED; then \
+      echo "ERROR: mase_bc2 is not statically linked. It still needs:"; \
+      readelf -d bin/Release/mase_bc2 | grep NEEDED; \
+      exit 1; \
+    fi
+
 
 # ---- Stage 3: small final image ----------------------------------------------
 FROM alpine:3.22
 
-# Runtime libraries the compiled program needs
-RUN apk add --no-cache libstdc++ libgcc zlib
-
+# No runtime libraries needed: the program is fully static.
 COPY --from=build /bfbc2/src/bin/Release/mase_bc2 /opt/mase/mase_bc2
 
 WORKDIR /opt/mase
