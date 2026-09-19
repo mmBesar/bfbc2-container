@@ -70,9 +70,15 @@ jobs:
       # server, on Linux: Wine inside a fake screen (xvfb-run).
       # WINEDEBUG adds a trace of which Windows libraries get loaded. It shows
       # how far the program gets. Errors are printed too.
+      #
+      # "--init" matters: xvfb-run must NOT be the very first process (PID 1)
+      # in the container. The fake screen only tells its parent "I am ready"
+      # when that parent is not PID 1, so otherwise xvfb-run waits forever and
+      # never starts the game. (That is what happened in test run 1 and 2.)
+      # "--init" puts a tiny helper program in the PID 1 spot.
       - name: Start server A (Instance/, RCON bare port 48888)
         run: |
-          docker run -d --name bc2-a --net=host --user 1000:1000 \
+          docker run -d --init --name bc2-a --net=host --user 1000:1000 \
             -e WINEDEBUG=err+all,fixme-all,+loaddll \
             -v "$PWD/data:/data" -w /data/pack \
             bfbc2-game:test \
@@ -99,7 +105,7 @@ jobs:
 
       - name: Start server B (Instance_conq/, RCON 0.0.0.0:48889)
         run: |
-          docker run -d --name bc2-b --net=host --user 1000:1000 \
+          docker run -d --init --name bc2-b --net=host --user 1000:1000 \
             -e WINEDEBUG=err+all,fixme-all,+loaddll \
             -v "$PWD/data:/data" -w /data/pack \
             bfbc2-game:test \
