@@ -270,8 +270,6 @@ by default (`WEB_PORT`).
 
 - x86-64 only (Wine, 32-bit game server).
 - Host networking only.
-- The master's log timestamps show wrong hours and minutes (cosmetic, from the
-  original program).
 - The web interface cannot yet start or stop a single server, edit the ban
   list or the map list, or manage master accounts. These are planned.
 
@@ -328,6 +326,8 @@ The third-party software this image uses keeps its own licenses. In particular:
 
 - **MASE** has no separate license file. Its readme invites others to change
   the code and release the result, and asks only for credit. It is compiled
-  from that published source at build time and credited above. If you are one
-  of its authors and would like anything done differently, please open an issue.
+  from that published source at build time and credited above. The only change
+  made to its code is a one-line fix for the log timestamps (visible in the
+  `Dockerfile`). If you are one of its authors and would like anything done
+  differently, please open an issue.
 - The **server pack** is not part of this repository or the image.

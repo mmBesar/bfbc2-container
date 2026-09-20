@@ -55,6 +55,13 @@ RUN curl -fL --retry 3 -o /tmp/src.rar "${SRC_URL}" \
 
 WORKDIR /bfbc2/src
 
+# Small fix to the master's log timestamps. The original code reads the time
+# zone from a struct that this C library never fills in, so the hours and
+# minutes came out as garbage (like [-3:-28:10.649]). We ask the system for the
+# local time instead. The check makes the build fail if the code ever changes.
+RUN sed -i 's|gettimeofday(&time, &zone);|gettimeofday(\&time, \&zone); { time_t tt_ = time.tv_sec; struct tm lt_; localtime_r(\&tt_, \&lt_); zone.tz_minuteswest = (int)(-lt_.tm_gmtoff / 60); zone.tz_dsttime = 0; }|' source/Framework/Logger.cpp \
+ && test "$(grep -c 'localtime_r(&tt_' source/Framework/Logger.cpp)" = 4
+
 # The project files point at the original author's own library folders.
 # Point them at the ones in our build image (stage 2) instead.
 # Also link the program fully STATIC (-static), so it carries everything it

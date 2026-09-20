@@ -19,7 +19,9 @@ import (
 	"time"
 )
 
-//go:embed web
+// The web page: three plain files that live next to the Go code.
+//
+//go:embed index.html app.js style.css
 var webFiles embed.FS
 
 func getenv(key, fallback string) string {
@@ -49,10 +51,7 @@ func main() {
 		s.StartPolling(5 * time.Second)
 	}
 
-	static, err := fs.Sub(webFiles, "web")
-	if err != nil {
-		log.Fatal(err)
-	}
+	static := fs.FS(webFiles)
 	user, pass := loadCredentials(configDir)
 	app := &App{
 		servers: servers, byID: byID, user: user, pass: pass,
