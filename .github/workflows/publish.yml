@@ -1,0 +1,148 @@
+# =============================================================================
+# Publish the all-in-one image to GitHub's container registry (GHCR).
+#
+# - Runs only when you click "Run workflow" in the Actions tab. Nothing is
+#   published automatically.
+# - You type a version (for example 0.1.0). The image is published with that
+#   tag, and optionally as "latest" too.
+#
+# The order is a safety chain. If any step fails, nothing is published:
+#   1. The full test (test-aio.yml) must pass.
+#   2. The image is built and scanned for known CRITICAL vulnerabilities that
+#      already have a fix (Trivy).
+#   3. Only then is it pushed, with an SBOM (list of contents) and a build
+#      provenance record attached.
+#
+# amd64 only, on a native runner: the game server (Wine + 32-bit program)
+# does not run on ARM.
+# =============================================================================
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, for example 0.1.0"
+        required: true
+        type: string
+      also_latest:
+        description: "Also move the 'latest' tag to this version"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Step 1: the complete environment-variable test.
+  test:
+    uses: ./.github/workflows/test-aio.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write      # needed to push to GHCR
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v6
+
+      # GHCR image names must be lower case.
+      - name: Work out the image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Build once for scanning. Not pushed. The layers come from the cache the
+      # test just filled, so this is quick.
+      - name: Build the image for scanning (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: slim
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:scan
+          cache-from: type=gha,scope=aio
+          cache-to: type=gha,scope=aio,mode=max
+
+      # Step 2: fail if the image has a CRITICAL vulnerability that has a fix.
+      # (Unfixed ones are ignored, because nobody can act on them.)
+      # This third-party action is pinned to a full commit SHA on purpose: its
+      # version tags were hijacked in March 2026 (CVE-2026-33634). This SHA is
+      # release v0.35.0, the one that was confirmed safe.
+      - name: Scan the image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 3: push. Same cache, so nothing is rebuilt from scratch.
+      # The empty second tag line is ignored when "latest" is not wanted.
+      - name: Push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: slim
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ inputs.version }}
+            ${{ inputs.also_latest && format('{0}:latest', env.IMAGE) || '' }}
+          # The "source" label links the package to this repository, so it shows
+          # up on the repo page and inherits the repo's access permissions.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          sbom: true
+          provenance: true
+          cache-from: type=gha,scope=aio
+
+      # You wanted NO private images. GitHub creates a new package as private
+      # and offers no way to change that from a workflow, so it takes one click,
+      # once. This step proves the image can be pulled by anyone (no login).
+      # On the first publish it will fail with the exact link, which is the
+      # reminder. After the one-time click, it passes on every later publish.
+      - name: Check that anyone can pull the image
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d)"     # empty config = not logged in
+          if docker pull "${IMAGE}:${{ inputs.version }}" > /dev/null 2>&1; then
+            echo "OK: the image can be pulled without logging in."
+          else
+            pkg="${GITHUB_REPOSITORY#*/}"
+            url="https://github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/${pkg,,}/settings"
+            {
+              echo "### The image was pushed, but it is still PRIVATE"
+              echo ""
+              echo "One-time step: open ${url}"
+              echo "and under **Danger Zone** choose **Change visibility -> Public**."
+              echo "It stays public for every later publish."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "The image is still private. Set it to public once: ${url}"
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published (public)"
+            echo ""
+            echo "\`${IMAGE}:${{ inputs.version }}\`"
+            if [ "${{ inputs.also_latest }}" = "true" ]; then echo ""; echo "\`${IMAGE}:latest\`"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

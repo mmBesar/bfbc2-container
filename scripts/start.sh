@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 mmBesar
 # =============================================================================
 # start.sh - runs as the unprivileged user (see entrypoint.sh).
 #
@@ -79,13 +81,21 @@ run_server() {
         $extra
 }
 
+# Stop everything in a sensible order: first the restart loops and the master,
+# then Wine (all game servers), and only then the fake screen. Stopping the
+# screen first makes Wine print "X connection broken" errors.
+XVFB_PID=""
 shutdown() {
     log "shutting down"
     touch "$STOPFLAG"
-    kill $(jobs -p) 2>/dev/null || true
+    local pid
+    for pid in $(jobs -p); do
+        [ "$pid" = "$XVFB_PID" ] || kill "$pid" 2>/dev/null || true
+    done
     pkill -TERM -x mase_bc2 2>/dev/null || true
     wineserver -k 2>/dev/null || true
     sleep 1
+    [ -z "$XVFB_PID" ] || kill "$XVFB_PID" 2>/dev/null || true
     exit 0
 }
 trap shutdown TERM INT
@@ -102,6 +112,7 @@ if [ "${#SERVERS[@]}" -gt 0 ]; then
     # One fake screen for all servers. Started directly (not with xvfb-run).
     export DISPLAY=:99
     Xvfb :99 -nolisten tcp -screen 0 1280x1024x24 &
+    XVFB_PID=$!
     for _ in $(seq 1 50); do
         [ -S /tmp/.X11-unix/X99 ] && break
         sleep 0.2

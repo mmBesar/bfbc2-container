@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 mmBesar
 # =============================================================================
 # BFBC2 all-in-one image
 #
@@ -13,6 +15,8 @@
 #   3. final:    a Debian image with Wine, plus that program and our scripts.
 # The game server files are NOT baked in. On first start the container
 # downloads them (or uses your own copy) into /data/pack and verifies them.
+# (An optional "bundled" build target that does include them exists, but it
+# is never published. See the end of this file.)
 #
 # Credits:
 #   - MASE (master server emulator and server pack): Triver, on SourceForge
@@ -89,8 +93,8 @@ RUN if readelf -d bin/Release/mase_bc2 | grep -q NEEDED; then \
     fi
 
 
-# ---- Stage 3: final image ----------------------------------------------------
-FROM debian:bookworm-slim
+# ---- Stage 3: the runtime image ----------------------------------------------
+FROM debian:bookworm-slim AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -176,6 +180,52 @@ ENV PUID=1000 \
     PACK_SHA256=d1b25860f23af15cbab6549d41840836056ab38a49357eb3064a7d00f6d9f04b \
     WINEDEBUG=fixme-all,err-vulkan
 
+# Descriptive labels. (The link to the source repository is added by the
+# publish workflow, because it depends on where the repo lives.)
+LABEL org.opencontainers.image.title="BFBC2 All-in-One" \
+      org.opencontainers.image.description="Battlefield: Bad Company 2 LAN server (master + game servers under Wine) in one container, configured only by environment variables" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+
 WORKDIR /data
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+
+
+# =============================================================================
+# Two ways to finish the image. The LAST stage of this file is the default.
+#
+#   slim     (default)  The small image that gets published. It does NOT contain
+#                       the game server files. On first start it downloads them
+#                       once into /data (or uses your own copy: PACK_FILE).
+#
+#   bundled  (optional) An image with the server pack (Bc2emu_V09.rar) already
+#                       inside, so it needs no download at all. It is NOT
+#                       published, because the pack contains EA's game server
+#                       program and level data, which we do not redistribute.
+#                       Build it yourself for your own machines:
+#                           docker build --target bundled -t bfbc2-bundled .
+# =============================================================================
+
+# ---- The pack, downloaded and verified (only used by "bundled") --------------
+FROM debian:bookworm-slim AS pack
+
+ARG PACK_URL="https://downloads.sourceforge.net/project/battlefieldbadcompany2mase/Bc2emu_V09.rar"
+# SHA256 of Bc2emu_V09.rar. The build FAILS if the download does not match.
+ARG PACK_SHA256="d1b25860f23af15cbab6549d41840836056ab38a49357eb3064a7d00f6d9f04b"
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates wget \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir /pack \
+ && wget -nv --tries=3 -O /pack/Bc2emu_V09.rar "${PACK_URL}" \
+ && echo "${PACK_SHA256}  /pack/Bc2emu_V09.rar" | sha256sum -c -
+
+# ---- bundled: runtime + the pack file -----------------------------------------
+# The container still unpacks it once into /data/pack on first start, using the
+# same code path as PACK_FILE. Only the download is gone.
+FROM runtime AS bundled
+COPY --from=pack /pack/Bc2emu_V09.rar /opt/pack/Bc2emu_V09.rar
+ENV PACK_FILE=/opt/pack/Bc2emu_V09.rar
+
+# ---- slim: the default, small image -----------------------------------------
+FROM runtime AS slim

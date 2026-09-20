@@ -19,6 +19,8 @@ name: test-aio
 
 on:
   workflow_dispatch:
+  # Lets publish.yml run this whole test first and refuse to publish if it fails.
+  workflow_call:
 
 permissions:
   contents: read
@@ -41,11 +43,19 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: slim
           load: true
           push: false
           tags: bfbc2-aio:test
           cache-from: type=gha,scope=aio
           cache-to: type=gha,scope=aio,mode=max
+
+      # How big is the image? (Compressed download size is a bit smaller.)
+      - name: Show the image size
+        run: |
+          docker image ls bfbc2-aio:test --format 'image size on disk: {{.Size}}'
+          echo "--------- biggest layers"
+          docker history bfbc2-aio:test --format '{{.Size}}\t{{.CreatedBy}}' | sort -hr | head -6 | cut -c1-110
 
       # Everything below is configured with environment variables, exactly
       # like a Compose file would do. /data starts empty.

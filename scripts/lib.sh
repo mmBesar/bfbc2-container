@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 mmBesar
 # =============================================================================
 # lib.sh - turns Docker Compose environment variables into config files.
 #
@@ -280,7 +282,13 @@ gen_server() {
     pass=$(setting "$n" GAME_PASSWORD "")
     banner=$(setting "$n" BANNER_URL "")
     [ -z "$desc" ]   || var_set serverDescription "${desc//$'\n'/|}"   # new lines become | in this game
-    [ -z "$pass" ]   || var_set gamePassword "$pass"
+    if [ -n "$pass" ]; then
+        var_set gamePassword "$pass"
+        # Found in testing: the game does not apply a password on a ranked server.
+        if [ "${OPT_VAL[Ranked],,}" = true ]; then
+            warn "server ${n}: GAME_PASSWORD is set, but this server is ranked and the game ignores passwords on ranked servers. Set SERVER_${n}_RANKED=false to use a password."
+        fi
+    fi
     [ -z "$banner" ] || var_set bannerUrl "$banner"
 
     # Anything else: SERVER_VAR_<name> for all servers, SERVER_<n>_VAR_<name> for one.

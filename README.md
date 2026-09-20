@@ -1,27 +1,43 @@
+<div align="center">
+
 # BFBC2 All-in-One
 
-One container that runs a complete **Battlefield: Bad Company 2** LAN server:
-the master server (accounts and server list), any number of game servers, all
-configured **only through environment variables** in your Compose file.
+**A complete Battlefield: Bad Company 2 LAN server in a single container,<br>configured entirely with environment variables.**
 
-> **Status: experimental.** The container is tested in CI (see below), but it
-> has not yet been tested with a real game client. A web interface for managing
-> the servers is planned.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Test](https://github.com/mmBesar/bfbc2-container/actions/workflows/test-aio.yml/badge.svg)](https://github.com/mmBesar/bfbc2-container/actions/workflows/test-aio.yml)
+[![Publish](https://github.com/mmBesar/bfbc2-container/actions/workflows/publish.yml/badge.svg)](https://github.com/mmBesar/bfbc2-container/actions/workflows/publish.yml)
+[![Image](https://img.shields.io/badge/ghcr.io-mmbesar%2Fbfbc2--container-2496ED?logo=docker&logoColor=white)](https://github.com/mmBesar/bfbc2-container/pkgs/container/bfbc2-container)
+![Platform](https://img.shields.io/badge/platform-linux%2Famd64-lightgrey?logo=linux&logoColor=white)
+![Config](https://img.shields.io/badge/config-100%25%20environment%20variables-brightgreen)
+![Status](https://img.shields.io/badge/status-experimental-orange)
+![Personal project](https://img.shields.io/badge/project-personal%20work-8A2BE2)
+
+</div>
+
+> [!NOTE]
+> **This is a personal project.** I built it for my own LAN server and my own
+> homelab, in my spare time, and I share it in case it is useful to others.
+> It comes **as is, with no warranty and no promise of support**. It is **not**
+> affiliated with or endorsed by EA, DICE, or the authors of the projects it
+> builds on (all credited [below](#credits-and-sources)). Issues and ideas are
+> welcome, but I can't promise quick answers.
 
 ## What is inside
 
-- The **master server emulator** (MASE), compiled from source at build time
-  into one static program.
-- **Game servers**, run under Wine. All of them share one Wine setup and one
-  fake screen, which saves a lot of memory compared with one container per
+- The **master server emulator** (MASE): accounts and the server list. It is
+  compiled from its published source when the image is built, into one static
+  program.
+- **Any number of game servers**, run under Wine. All of them share one Wine
+  setup and one fake screen, which uses much less memory than one container per
   server.
-- A small start script that turns environment variables into all config files,
-  restarts a server if it stops, and shuts everything down cleanly.
+- A small start script that turns environment variables into every config
+  file, restarts a server if it stops, and shuts everything down cleanly.
 
 The game server files (about 440 MB) are **not** in the image. On first start
-the container downloads them once from the MASE project on SourceForge,
-checks their SHA256, and unpacks them into `/data/pack`. You can use your own
-copy instead (`PACK_FILE`).
+the container downloads them once, checks their SHA256, and unpacks them into
+`/data/pack`. You can also use your own copy of the file (see
+[Use your own copy of the server pack](#use-your-own-copy-of-the-server-pack)).
 
 ## Requirements
 
@@ -33,29 +49,84 @@ copy instead (`PACK_FILE`).
 
 ## Quick start
 
-1. Copy `docker-compose.example.yml` to `docker-compose.yml` and adjust it.
-2. Start it:
+```yaml
+services:
+  bfbc2:
+    image: ghcr.io/mmbesar/bfbc2-container:latest
+    container_name: bfbc2
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/data
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: "UTC"
+      MASTER_EMULATOR_IP: "192.168.1.10"     # this machine's LAN IP
+      SERVER_RCON_PASSWORD: "change-me"
+      SERVER_1_TYPE: "rush"
+      SERVER_1_NAME: "My Rush Server"
+      SERVER_2_TYPE: "sqdm"
+      SERVER_2_NAME: "My SQDM Server"
+```
 
-   ```sh
-   docker compose up -d
-   docker compose logs -f
-   ```
+```sh
+docker compose up -d
+docker compose logs -f
+```
 
-3. The first start takes a few minutes while the server pack downloads.
+The first start takes a few minutes while the server pack downloads. A fuller
+file with every option explained is in
+[`docker-compose.example.yml`](docker-compose.example.yml).
+
+### Use your own copy of the server pack
+
+You do not have to download the pack. If you already have `Bc2emu_V09.rar`:
+
+1. Copy the **file** into the folder you mount at `/data`, so it appears as
+   `./data/Bc2emu_V09.rar` on the host.
+2. Add `PACK_FILE: "/data/Bc2emu_V09.rar"` to the environment.
+
+Nothing else needs mounting, because `./data` is already mounted. On start the
+container checks the file's SHA256 (it refuses any other file), unpacks it once
+into `./data/pack`, and does not touch the `.rar` again. Keep it there as your
+backup. If you prefer to keep it elsewhere, mount just that one file:
+`- /path/to/Bc2emu_V09.rar:/data/Bc2emu_V09.rar:ro`.
+
+### Want an image with the pack already inside?
+
+The published image is small and does **not** contain the game server files.
+That is on purpose: the pack holds EA's game server program and level data, and
+I would rather not host those in a public image. It costs you one download,
+once. After that the files live in your `./data` folder and are never fetched
+again, not even when you update the image.
+
+If you want an image that needs no download at all (for example for several
+machines in your own network), build it yourself:
+
+```sh
+git clone https://github.com/mmBesar/bfbc2-container.git
+cd bfbc2-container
+docker build --target bundled -t bfbc2-bundled .
+```
+
+The build downloads the pack and checks its SHA256, and the container still
+unpacks it into `./data/pack` on first start. Keep that image for your own use
+or push it to a registry of your own. Please do not publish it publicly.
 
 ## Connecting a client
 
-The game needs two small files in its install folder (next to the game
-executable). After the first start you will find them in
+The game needs two small files in its install folder, next to the game
+executable. After the first start you will find them in
 `./data/pack/Crack - Copy to client root/`:
 
 - `dinput8.dll`
 - `bfbc2.ini`
 
 Open `bfbc2.ini` and set `host=` to the IP address of the machine running this
-container. Start the game, create an account with any name and password (it
-is a local account, kept in plain text in `./data/master/database`), and pick
-a server from the list.
+container. Start the game, create an account with any name and password (it is
+a local account, kept in plain text in `./data/master/database`), and pick a
+server from the list.
 
 ## Environment variables
 
@@ -109,7 +180,7 @@ The keys marked "per server only" have no global form.
 | `HARDCORE`, `FRIENDLY_FIRE` | `false` | |
 | `TEAM_BALANCE`, `KILLCAM`, `MINIMAP`, `CROSSHAIR`, `SPOTTING_3D`, `MINIMAP_SPOTTING` | `true` | |
 | `DESCRIPTION` | none | Server description (line breaks are allowed) |
-| `GAME_PASSWORD` | none | Password to join |
+| `GAME_PASSWORD` | none | Password to join. Only works on unranked servers (`RANKED=false`); the game ignores it on ranked ones. |
 | `BANNER_URL` | none | Server banner image address |
 | `STARTUP` | none | Extra raw lines for the server's startup script |
 | `EXTRA_ARGS` | none | Extra command line arguments for the server program |
@@ -137,14 +208,14 @@ Mount one folder at `/data`:
 
 | Path | Contents |
 |---|---|
-| `/data/pack` | The unpacked server pack (safe to delete; it is downloaded again) |
+| `/data/pack` | The unpacked server pack (safe to delete; it is unpacked again) |
 | `/data/instances/<n>` | One folder per game server: generated settings, ban list, reserved slots |
 | `/data/master` | The master's generated config, its templates, and the account database |
 | `/data/config` | The generated RCON password, if you did not set one |
 
 Settings files are **regenerated from your environment variables on every
 start**, so change them in Compose, not in the files. Ban lists, reserved
-slots and accounts are kept.
+slots and accounts are kept. Back up this folder.
 
 ## Ports and firewall
 
@@ -165,32 +236,60 @@ optionally 9946). Each game server needs its own game port. RCON is bound to
 - Host networking only.
 - The master's log timestamps show wrong hours and minutes (cosmetic, from the
   original program).
-- Not yet tested with a real game client.
+- Not yet tested with a real game client. A web interface for managing the
+  servers is planned.
 
-## Tests
+## Tests and releases
 
-Automated tests run in GitHub Actions and are started by hand from the
-Actions tab. `test-aio` builds the image, starts three servers from
-environment variables alone, and checks over RCON that the settings arrived,
-that `PUID`/`PGID`/`TZ` work, that all servers register with the master, and
-that a restart is clean and does not download the pack again.
+Automated tests run in GitHub Actions and are started by hand from the Actions
+tab.
 
-## Acknowledgements
+- **`test-aio`** builds the image, starts three servers from environment
+  variables alone, and checks over RCON that the settings arrived, that
+  `PUID`/`PGID`/`TZ` work, that all servers register with the master, and that a
+  restart is clean and does not download the pack again.
+- **`publish`** runs that whole test first, scans the image with Trivy (fails on
+  any fixable CRITICAL vulnerability), and only then pushes the image to the
+  GitHub Container Registry with an SBOM and build provenance. It finally checks
+  that the image can be pulled by anyone without logging in.
 
-Huge thanks to the people whose work this project builds on:
+## Credits and sources
 
-- **Triver**, developer of the **BFBC2 MASE** master server emulator and server
-  pack ([SourceForge: battlefieldbadcompany2mase](https://sourceforge.net/projects/battlefieldbadcompany2mase/),
-  project page by flyer8472). Its readme also thanks **Domo**, **Freaky123**
-  and **Aluigi**.
-- **jkuettner** - [bfbc2-server](https://codeberg.org/jkuettner/bfbc2-server),
-  Docker images that showed how to run this stack in containers.
-- **The-May** - [bfbc2-webcon](https://github.com/The-May/bfbc2-webcon),
-  a web dashboard that showed how the remote admin protocol behaves.
+This project is only glue. All the hard work was done by others. Thank you!
 
-Battlefield: Bad Company 2 is a product of EA / DICE. This project is not
-affiliated with or endorsed by them.
+| Who / what | What it is and how it is used here |
+|---|---|
+| **Triver** and the **BFBC2 MASE** project ([SourceForge](https://sourceforge.net/projects/battlefieldbadcompany2mase/), project page by flyer8472) | The master server emulator (built from its published source) and the server pack with the client hook. This project would not exist without it. Its readme also thanks **Domo**, **Freaky123** and **Aluigi**. |
+| **jkuettner**: [bfbc2-server](https://codeberg.org/jkuettner/bfbc2-server) (Codeberg; the [GitHub copy](https://github.com/jkuettner/bfbc2-server) is archived) | Docker images that showed how to run the master and the game servers in containers, and which Wine pieces are needed. |
+| **The-May**: [bfbc2-webcon](https://github.com/The-May/bfbc2-webcon) | A web dashboard that showed how the remote admin (RCON) protocol behaves. |
+| **AdKats / PRoCon**: [Procon-1](https://github.com/AdKats/Procon-1) and **[OpenRCON](https://github.com/OpenRcon/OpenRcon)** | Remote admin tools known to work with this stack, and references for the RCON protocol. |
+| **[Wine](https://www.winehq.org/)**, **[winetricks](https://github.com/Winetricks/winetricks)**, **[Debian](https://www.debian.org/)**, **[Xvfb](https://www.x.org/)** | Run the Windows game server on Linux. |
+| **[tini](https://github.com/krallin/tini)**, **[gosu](https://github.com/tianon/gosu)** | Correct process handling and the PUID/PGID user switch in the container. |
+| **[Trivy](https://github.com/aquasecurity/trivy)**, the **Docker GitHub Actions** | Vulnerability scanning and image builds in CI. |
+
+Related projects I do not use, but which are worth knowing:
+[GrzybDev/BFBC2_MasterServer](https://github.com/GrzybDev/BFBC2_MasterServer)
+(a modern master server written in Python) and **Project Rome** (a
+community-run online backend for the game).
+
+Battlefield: Bad Company 2 is a product of EA / DICE. All trademarks belong to
+their owners. This project contains **no game files**: the server pack is
+downloaded from its original public location, and you must own a legitimate
+copy of the game to play.
 
 ## License
 
-Not yet decided for this repository's own files.
+The files in this repository (the Dockerfile, scripts, workflows and
+documentation) are licensed under the
+**[GNU Affero General Public License v3.0 or later](LICENSE)** (AGPL-3.0-or-later).
+You are free to use, study, change and share them, and if you share a changed
+version, or run one as a service for others, you must keep it open under the
+same license.
+
+The third-party software this image uses keeps its own licenses. In particular:
+
+- **MASE** has no separate license file. Its readme invites others to change
+  the code and release the result, and asks only for credit. It is compiled
+  from that published source at build time and credited above. If you are one
+  of its authors and would like anything done differently, please open an issue.
+- The **server pack** is not part of this repository or the image.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 mmBesar
 # =============================================================================
 # BFBC2 all-in-one - example docker-compose.yml
 #
@@ -11,8 +13,8 @@
 # =============================================================================
 services:
   bfbc2:
-    # Change this to your own image name, or use "build: ." to build locally.
-    image: ghcr.io/mmbesar/bfbc2-aio:latest
+    # Or use "build: ." to build it locally instead.
+    image: ghcr.io/mmbesar/bfbc2-container:latest
     # build: .
     container_name: bfbc2
     restart: unless-stopped
