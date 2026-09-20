@@ -8,7 +8,7 @@
 # config files to edit.
 #
 # HOW TO USE
-#   1. Change the line marked  <-- CHANGE ME (the RCON password).
+#   1. Change the two lines marked  <-- CHANGE ME (web password, RCON password).
 #   2. Comment out (put a # in front of) any server you do not want.
 #   3. docker compose up -d       then     docker compose logs -f
 #
@@ -22,6 +22,11 @@ services:
     container_name: bfbc2
     restart: unless-stopped
     network_mode: host                # required: port mapping breaks server registration
+    logging:                          # stops "docker logs" from growing forever
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./data:/data                  # everything is kept here. Back it up.
       # Own copy of the server pack? Put Bc2emu_V09.rar in ./data and use PACK_FILE below.
@@ -42,10 +47,17 @@ services:
       MASTER_PREMIUM_FOR_ALL: "true"          # everyone gets the premium edition items
       MASTER_VIETNAM_FOR_ALL: "true"          # everyone may join Vietnam servers
       MASTER_SPECACT_FOR_ALL: "false"         # everyone gets the SPECACT kits
-      # MASTER_FILE_LOG_LEVEL: "3"            # master log detail, 1 (default) to 3. Use 3 to debug.
+      # MASTER_FILE_LOG_LEVEL: "3"            # master log detail: 1 (default, small) to 3 (HUGE, only to debug)
       # MASTER_LOG_TO_CONSOLE: "false"        # do not show the master log in "docker logs"
       # MASTER_ENABLED: "false"               # do not run a master here (use another one)
       # MASTER_HOST: "127.0.0.1"              # where the servers look for the master
+
+      # ---- web interface: manage the servers in your browser ------------------
+      # Open  http://<this machine's IP>:5010  and log in. It is plain HTTP: keep it on your LAN.
+      WEB_PASSWORD: "ChangeMe123"             # <-- CHANGE ME (if left out, a random one is saved in ./data/config/web-password)
+      # WEB_USER: "admin"                     # login name
+      # WEB_PORT: "5010"                      # port
+      # WEB_ENABLED: "false"                  # turn the web interface off
 
       # ---- defaults for EVERY game server -------------------------------------
       # Any SERVER_<NAME> here can be overridden for one server as SERVER_<n>_<NAME>.

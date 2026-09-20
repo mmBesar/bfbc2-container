@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BFBC2 Server Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>BFBC2 Server Manager</h1>
+    <span id="master" class="pill">master: ...</span>
+    <span class="spacer"></span>
+    <span id="stamp" class="muted small"></span>
+    <span id="version" class="muted small"></span>
+  </header>
+
+  <main>
+    <!-- Overview: one card per game server -->
+    <section id="overview">
+      <div id="cards" class="cards"></div>
+    </section>
+
+    <!-- Details of the chosen server -->
+    <section id="detail" hidden>
+      <div class="detail-head">
+        <button id="back" type="button">&larr; All servers</button>
+        <h2 id="d-title"></h2>
+        <span id="d-state" class="pill"></span>
+      </div>
+      <p id="d-sub" class="muted"></p>
+
+      <nav id="tabs">
+        <button type="button" data-tab="players" class="active">Players</button>
+        <button type="button" data-tab="round">Round &amp; map</button>
+        <button type="button" data-tab="settings">Settings</button>
+        <button type="button" data-tab="console">Console</button>
+      </nav>
+
+      <div id="tab-players" class="tab">
+        <table id="players">
+          <thead>
+            <tr><th>Name</th><th>Team</th><th>Squad</th><th>Kills</th><th>Deaths</th><th>Score</th><th>Ping</th><th>Actions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="no-players" class="muted" hidden>No players online.</p>
+      </div>
+
+      <div id="tab-round" class="tab" hidden>
+        <p id="round-now" class="muted"></p>
+        <div class="row">
+          <button type="button" id="r-next">Next round</button>
+          <button type="button" id="r-restart">Restart round</button>
+          <button type="button" id="r-end1">End round (team 1 wins)</button>
+          <button type="button" id="r-end2">End round (team 2 wins)</button>
+        </div>
+        <h3>Map list</h3>
+        <ol id="maplist"></ol>
+      </div>
+
+      <div id="tab-settings" class="tab" hidden>
+        <p class="muted small">
+          Changes apply to the running server at once. They are <strong>not kept after a restart</strong>:
+          to make one permanent, set it in <code>docker-compose.yml</code>. Use <code>|</code> for a line break in the description.
+        </p>
+        <div id="settings-form"></div>
+      </div>
+
+      <div id="tab-console" class="tab" hidden>
+        <pre id="console-out"></pre>
+        <form id="console-form" autocomplete="off">
+          <input id="console-in" type="text" placeholder='For example: serverInfo   or   admin.say "hello" all' maxlength="1000">
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

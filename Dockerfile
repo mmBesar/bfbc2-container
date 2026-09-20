@@ -93,7 +93,18 @@ RUN if readelf -d bin/Release/mase_bc2 | grep -q NEEDED; then \
     fi
 
 
-# ---- Stage 3: the runtime image ----------------------------------------------
+# ---- Stage 3: the web interface (Go) -----------------------------------------
+# A small program with no outside dependencies. Its checks and tests run during
+# the build, so a broken web interface can never end up in the image.
+FROM golang:1-bookworm AS webui
+WORKDIR /src
+COPY webui/ ./
+RUN go vet ./... \
+ && go test ./... \
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/bfbc2-webui .
+
+
+# ---- Stage 4: the runtime image ----------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -164,13 +175,14 @@ USER root
 # denied". So empty /tmp now. (The entrypoint also cleans it at every start.)
 RUN rm -rf /tmp/* /tmp/.[!.]* || true
 
-# The compiled master server and our scripts. These come AFTER the slow Wine
+# The compiled master server, the web interface and our scripts. These come AFTER the slow Wine
 # setup on purpose: changing a script then only rebuilds these last layers
 # instead of the whole Wine environment.
 # Note: COPY --chmod also applies to any folder it creates. The folder for
 # lib.sh must be readable by everyone, so lib.sh uses 755 too (it is only
 # read, not run, but 755 keeps its folder open).
 COPY --from=build /bfbc2/src/bin/Release/mase_bc2 /opt/mase/mase_bc2
+COPY --from=webui /out/bfbc2-webui /opt/webui/bfbc2-webui
 COPY --chmod=755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=755 scripts/start.sh      /usr/local/bin/start.sh
 COPY --chmod=755 scripts/fetch-pack.sh /usr/local/bin/fetch-pack

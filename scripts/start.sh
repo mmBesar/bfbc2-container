@@ -81,6 +81,10 @@ run_server() {
         $extra
 }
 
+run_webui() {
+    /opt/webui/bfbc2-webui
+}
+
 # Stop everything in a sensible order: first the restart loops and the master,
 # then Wine (all game servers), and only then the fake screen. Stopping the
 # screen first makes Wine print "X connection broken" errors.
@@ -93,6 +97,7 @@ shutdown() {
         [ "$pid" = "$XVFB_PID" ] || kill "$pid" 2>/dev/null || true
     done
     pkill -TERM -x mase_bc2 2>/dev/null || true
+    pkill -TERM -x bfbc2-webui 2>/dev/null || true
     wineserver -k 2>/dev/null || true
     sleep 1
     [ -z "$XVFB_PID" ] || kill "$XVFB_PID" 2>/dev/null || true
@@ -128,6 +133,12 @@ if [ "${#SERVERS[@]}" -gt 0 ]; then
         supervise "game server ${n}" run_server "$n"
         sleep 2    # the original launcher also waits between servers
     done
+fi
+
+# The web interface (needs at least one game server to manage).
+if [ "$(norm_bool "${WEB_ENABLED:-true}")" = true ] && [ "${#SERVERS[@]}" -gt 0 ]; then
+    log "starting the web interface on port ${WEB_PORT:-5010}"
+    supervise "the web interface" run_webui
 fi
 
 log "everything is started"

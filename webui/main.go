@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 mmBesar
+
+// bfbc2-webui: the web interface of the BFBC2 all-in-one container.
+//
+// It runs next to the game servers, talks to each one over RCON on localhost,
+// and shows their status with buttons for the common admin tasks.
+package main
+
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+//go:embed web
+var webFiles embed.FS
+
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func main() {
+	log.SetFlags(0)
+	log.SetPrefix("[webui] ")
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println(version)
+		return
+	}
+
+	dataDir := getenv("DATA_DIR", "/data")
+	instanceRoot := getenv("INSTANCE_ROOT", filepath.Join(dataDir, "instances"))
+	configDir := getenv("CONFIG_DIR", filepath.Join(dataDir, "config"))
+	masterDir := getenv("MASTERDIR", filepath.Join(dataDir, "master"))
+
+	servers := DiscoverServers(os.Environ(), instanceRoot, log.Printf)
+	byID := map[int]*Server{}
+	for _, s := range servers {
+		byID[s.ID] = s
+		s.StartPolling(5 * time.Second)
+	}
+
+	static, err := fs.Sub(webFiles, "web")
+	if err != nil {
+		log.Fatal(err)
+	}
+	user, pass := loadCredentials(configDir)
+	app := &App{
+		servers: servers, byID: byID, user: user, pass: pass,
+		masterConf: filepath.Join(masterDir, "config.ini"),
+		started:    time.Now(), static: static,
+	}
+
+	addr := net.JoinHostPort(getenv("WEB_BIND", "0.0.0.0"), getenv("WEB_PORT", "5010"))
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           app.routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	log.Printf("version %s, managing %d server(s), listening on http://%s", version, len(servers), addr)
+	log.Fatal(srv.ListenAndServe())
+}

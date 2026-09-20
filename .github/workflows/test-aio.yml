@@ -66,6 +66,7 @@ jobs:
             -e PUID=1234 -e PGID=1234 -e TZ=Africa/Cairo \
             -e MASTER_FILE_LOG_LEVEL=3 \
             -e MASTER_ALL_STATS_UNLOCKED=true \
+            -e WEB_PASSWORD=webpass123 \
             -e SERVER_RCON_PASSWORD=testpass123 \
             -e SERVER_MAX_PLAYERS=24 \
             -e SERVER_1_TYPE=rush \
@@ -252,6 +253,34 @@ jobs:
       # Give the servers time to send heartbeats to the master.
       - name: Wait for the heartbeats
         run: sleep 30
+
+      # The web interface: login is required, it sees all three servers, and a
+      # command sent through it reaches a real game server.
+      - name: Check the web interface
+        run: |
+          fail=0
+          U=http://127.0.0.1:5010
+          echo "--------- health check needs no login"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' $U/healthz)" = 200 ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- no password: refused"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' $U/api/servers)" = 401 ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- wrong password: refused"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -u admin:nope $U/api/servers)" = 401 ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- the page is served"
+          curl -s -u admin:webpass123 $U/ | grep -q "BFBC2 Server Manager" && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- the API sees all three servers online, by name"
+          curl -s -u admin:webpass123 $U/api/servers | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          names = [(s['info'] or {}).get('name') for s in d]
+          print(names, [s['online'] for s in d])
+          sys.exit(0 if len(d) == 3 and all(s['online'] for s in d) and names == ['Test Rush', 'Test SQDM', 'Test Vietnam Rush'] else 1)
+          " && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- a command sent through the web interface reaches server 2"
+          curl -s -u admin:webpass123 -H 'Content-Type: application/json' -d '{"command":"vars.serverName"}' $U/api/servers/2/console | grep -q "Test SQDM" && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- a cross-site style request (form data) is refused"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -u admin:webpass123 -d 'x=1' $U/api/servers/2/console)" = 415 ] && echo PASS || { echo FAIL; fail=1; }
+          exit "${fail}"
 
       - name: Check users, time zone, files and master registration
         run: |

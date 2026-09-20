@@ -1,0 +1,339 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 mmBesar
+"use strict";
+
+// The web page of the BFBC2 Server Manager. No frameworks, no build step.
+// Everything that comes from a server (player names, server names, ...) is put
+// on the page as plain text, never as HTML, so a nasty player name cannot do harm.
+
+const TYPE_NAMES = {
+  rush: "Rush", conq: "Conquest", conquest: "Conquest", sqdm: "Squad Deathmatch", sqrush: "Squad Rush",
+  vietrush: "Vietnam Rush", vietconq: "Vietnam Conquest", vietsqdm: "Vietnam Squad Deathmatch", vietsqrush: "Vietnam Squad Rush",
+};
+
+// Names of the Bad Company 2 maps (Vietnam maps are shown by their id).
+const MAP_NAMES = {
+  mp_001: "Panama Canal", mp_002: "Valparaiso", mp_003: "Laguna Alta", mp_004: "Isla Inocentes",
+  mp_005: "Atacama Desert", mp_006: "Arica Harbor", mp_007: "White Pass", mp_008: "Nelson Bay",
+  mp_009: "Laguna Presa", mp_012: "Port Valdez", mp_sp_002: "Cold War", mp_sp_005: "Heavy Metal",
+  bc1_oasis: "Oasis", bc1_harvest_day: "Harvest Day",
+};
+
+const SQUADS = ["No squad", "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
+
+const state = { servers: [], selected: null, tab: "players" };
+
+// ---- tiny helpers -----------------------------------------------------------
+
+const $ = (selector, root = document) => root.querySelector(selector);
+
+// el("div", {class: "x", onclick: fn}, "text", otherElement) builds an element.
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === false || v == null) continue;
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, "");
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    e.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return e;
+}
+
+let toastTimer = null;
+function toast(message, bad = false) {
+  const t = $("#toast");
+  t.textContent = message;
+  t.className = bad ? "bad" : "";
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+}
+
+async function api(method, path, body) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  let data = {};
+  try { data = await response.json(); } catch (_) { /* not JSON */ }
+  if (!response.ok) throw new Error(data.error || `${response.status} ${response.statusText}`);
+  return data;
+}
+
+function mapLabel(level) {
+  if (!level) return "-";
+  const id = level.replace(/^levels\//i, "").toLowerCase();
+  const base = id.replace(/_?(gr|cq|sr|sdm)$/, "");
+  const name = MAP_NAMES[base] || MAP_NAMES[id];
+  return name ? `${name} (${id})` : id;
+}
+
+const serverById = (id) => state.servers.find((s) => s.id === id);
+const modeName = (s) => TYPE_NAMES[s.type] || s.type;
+
+// ---- overview ---------------------------------------------------------------
+
+function renderCards() {
+  const box = $("#cards");
+  box.replaceChildren();
+  if (state.servers.length === 0) {
+    box.append(el("p", { class: "muted" }, "No game servers are configured. Set SERVER_1_TYPE in docker-compose.yml."));
+    return;
+  }
+  for (const s of state.servers) {
+    const info = s.info;
+    box.append(el("article", {
+      class: "card" + (s.online ? "" : " off"), tabindex: "0", role: "button",
+      onclick: () => select(s.id),
+      onkeydown: (e) => { if (e.key === "Enter") select(s.id); },
+    },
+      el("div", { class: "card-top" },
+        el("strong", {}, info ? info.name : `Server ${s.id}`),
+        el("span", { class: "pill " + (s.online ? "ok" : "bad") }, s.online ? "online" : "offline")),
+      el("div", { class: "muted" }, modeName(s)),
+      s.online && info
+        ? [el("div", {}, mapLabel(info.map)),
+           el("div", { class: "big" }, `${info.players}/${info.maxPlayers}`, el("small", {}, " players"))]
+        : el("div", { class: "muted" }, s.error || "waiting for the server..."),
+      el("div", { class: "muted small" }, `game port ${s.gamePort}`)));
+  }
+}
+
+// ---- one server ---------------------------------------------------------------
+
+function select(id) {
+  state.selected = id;
+  state.tab = "players";
+  $("#overview").hidden = true;
+  $("#detail").hidden = false;
+  $("#console-out").textContent = "";
+  showTab("players");
+  renderDetail();
+}
+
+function back() {
+  state.selected = null;
+  $("#detail").hidden = true;
+  $("#overview").hidden = false;
+}
+
+function showTab(name) {
+  state.tab = name;
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active", b.dataset.tab === name);
+  for (const t of document.querySelectorAll(".tab")) t.hidden = t.id !== "tab-" + name;
+  if (name === "settings" || name === "round") loadSettings();
+}
+
+// Updates the parts of the detail view that change every few seconds.
+function renderDetail() {
+  const s = serverById(state.selected);
+  if (!s) return;
+  const info = s.info;
+  $("#d-title").textContent = info ? info.name : `Server ${s.id}`;
+  const pill = $("#d-state");
+  pill.textContent = s.online ? "online" : "offline";
+  pill.className = "pill " + (s.online ? "ok" : "bad");
+  $("#d-sub").textContent = s.online && info
+    ? `${modeName(s)} | ${mapLabel(info.map)} | round ${info.roundsPlayed} of ${info.roundsTotal} | ` +
+      `${info.players}/${info.maxPlayers} players | ${info.ranked ? "ranked" : "unranked"}` +
+      `${info.hasPassword ? " | password protected" : ""} | game port ${s.gamePort}`
+    : (s.error || "waiting for the server...");
+  $("#round-now").textContent = info ? `Now playing: ${mapLabel(info.map)}` : "";
+  renderPlayers(s);
+}
+
+function renderPlayers(s) {
+  const body = $("#players tbody");
+  body.replaceChildren();
+  const players = s.players || [];
+  $("#no-players").hidden = players.length > 0;
+  $("#players").hidden = players.length === 0;
+  for (const p of players) {
+    const name = p.name || "";
+    const team = parseInt(p.teamId, 10) || 0;
+    const squad = parseInt(p.squadId, 10) || 0;
+    body.append(el("tr", {},
+      el("td", { class: "team-" + team }, p.clanTag ? `[${p.clanTag}] ${name}` : name),
+      el("td", {}, team === 0 ? "-" : `Team ${team}`),
+      el("td", {}, SQUADS[squad] || squad),
+      el("td", {}, p.kills || "0"), el("td", {}, p.deaths || "0"),
+      el("td", {}, p.score || "0"), el("td", {}, p.ping || "-"),
+      el("td", { class: "actions" },
+        el("button", { type: "button", class: "warn", onclick: () => kick(name) }, "Kick"),
+        el("button", { type: "button", class: "danger", onclick: () => ban(name) }, "Ban"),
+        el("button", { type: "button", onclick: () => moveTeam(name, team) }, "Other team"),
+        el("button", { type: "button", onclick: () => moveSquad(name, team) }, "Squad..."))));
+  }
+}
+
+// Sends a command to the selected server and reports the result.
+async function act(action, body, okMessage) {
+  try {
+    await api("POST", `/api/servers/${state.selected}/${action}`, body);
+    toast(okMessage);
+    setTimeout(refresh, 700);
+    return true;
+  } catch (e) {
+    toast(e.message, true);
+    return false;
+  }
+}
+
+function kick(name) {
+  if (confirm(`Kick ${name}?`)) act("kick", { name }, `Kicked ${name}`);
+}
+
+function ban(name) {
+  const answer = prompt(`Ban ${name}.\nType "perm" for a permanent ban, "round" until the round ends, or a number of seconds:`, "perm");
+  if (answer === null) return;
+  const text = answer.trim().toLowerCase();
+  if (text === "perm" || text === "round") return void act("ban", { name, kind: text }, `Banned ${name} (${text})`);
+  const seconds = parseInt(text, 10);
+  if (!(seconds > 0)) return void toast("Please type perm, round, or a number of seconds.", true);
+  act("ban", { name, kind: "seconds", seconds }, `Banned ${name} for ${seconds} seconds`);
+}
+
+function moveTeam(name, team) {
+  const other = team === 1 ? 2 : 1;
+  if (confirm(`Move ${name} to team ${other}?`)) act("move", { name, team: other, squad: 0 }, `Moved ${name} to team ${other}`);
+}
+
+function moveSquad(name, team) {
+  const answer = prompt(`Squad for ${name} (0 = none, 1 = Alpha, 2 = Bravo, ... 8 = Hotel):`, "1");
+  if (answer === null) return;
+  const squad = parseInt(answer, 10);
+  if (!(squad >= 0 && squad <= 8)) return void toast("Please type a number from 0 to 8.", true);
+  act("move", { name, team, squad }, `Moved ${name} to ${SQUADS[squad]}`);
+}
+
+function endRound(team) {
+  if (confirm(`End the round with team ${team} winning?`)) act("round", { action: "end", team }, "Round ended");
+}
+
+// ---- settings and map list ------------------------------------------------------
+
+async function loadSettings() {
+  const form = $("#settings-form");
+  form.replaceChildren(el("p", { class: "muted" }, "Loading..."));
+  try {
+    const data = await api("GET", `/api/servers/${state.selected}/settings`);
+    buildSettings(data);
+    buildMapList(data);
+  } catch (e) {
+    form.replaceChildren(el("p", { class: "err" }, e.message));
+  }
+}
+
+async function saveSetting(name, value, undo) {
+  try {
+    await api("POST", `/api/servers/${state.selected}/setting`, { name, value });
+    toast(`Saved ${name}`);
+    setTimeout(refresh, 700);
+  } catch (e) {
+    toast(e.message, true);
+    if (undo) undo();
+  }
+}
+
+function buildSettings(data) {
+  const form = $("#settings-form");
+  form.replaceChildren();
+  for (const def of data.defs) {
+    if (!(def.name in data.values)) continue;
+    const value = data.values[def.name];
+    let control;
+    if (def.kind === "bool") {
+      const box = el("input", { type: "checkbox", id: "set-" + def.name });
+      box.checked = value === "true";
+      box.addEventListener("change", () => saveSetting(def.name, box.checked ? "true" : "false", () => { box.checked = !box.checked; }));
+      control = box;
+    } else {
+      const input = el("input", {
+        type: def.kind === "int" ? "number" : "text", id: "set-" + def.name,
+        value, maxlength: def.max || false, min: def.kind === "int" ? "0" : false,
+      });
+      const save = el("button", { type: "button", onclick: () => saveSetting(def.name, input.value) }, "Save");
+      control = [input, save];
+    }
+    form.append(el("div", { class: "setting" }, el("label", { for: "set-" + def.name }, def.name), control));
+  }
+}
+
+function buildMapList(data) {
+  const list = $("#maplist");
+  list.replaceChildren();
+  const current = (data.currentLevel || "").toLowerCase();
+  for (const level of data.maps) {
+    list.append(el("li", { class: level.toLowerCase() === current ? "current" : "" },
+      mapLabel(level), level.toLowerCase() === current ? "  <- now" : ""));
+  }
+  if (data.maps.length === 0) list.append(el("li", { class: "muted" }, "The server reported no maps."));
+}
+
+// ---- console -----------------------------------------------------------------------
+
+async function sendConsole(event) {
+  event.preventDefault();
+  const input = $("#console-in");
+  const command = input.value.trim();
+  if (!command) return;
+  const out = $("#console-out");
+  out.textContent += `> ${command}\n`;
+  try {
+    const data = await api("POST", `/api/servers/${state.selected}/console`, { command });
+    out.textContent += (data.output.length ? data.output.join(" ") : "OK") + "\n\n";
+  } catch (e) {
+    out.textContent += `ERROR: ${e.message}\n\n`;
+  }
+  out.scrollTop = out.scrollHeight;
+  input.value = "";
+}
+
+// ---- refreshing ------------------------------------------------------------------------
+
+async function refresh() {
+  try {
+    state.servers = await api("GET", "/api/servers");
+    $("#stamp").textContent = "updated " + new Date().toLocaleTimeString();
+    renderCards();
+    renderDetail();
+  } catch (e) {
+    $("#stamp").textContent = "cannot reach the manager: " + e.message;
+  }
+}
+
+async function loadStatus() {
+  const pill = $("#master");
+  try {
+    const st = await api("GET", "/api/status");
+    const ok = st.master.reachable;
+    pill.textContent = ok ? "master: running" : "master: not reachable";
+    pill.className = "pill " + (ok ? "ok" : "bad");
+    pill.title = st.master.ports.map((p) => `${p.name} (port ${p.port}): ${p.open ? "open" : "closed"}`).join("\n");
+    $("#version").textContent = "v" + st.version;
+  } catch (_) {
+    pill.textContent = "master: unknown";
+    pill.className = "pill";
+  }
+}
+
+// ---- start ---------------------------------------------------------------------------------
+
+$("#back").addEventListener("click", back);
+for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => showTab(b.dataset.tab));
+$("#r-next").addEventListener("click", () => { if (confirm("Start the next round?")) act("round", { action: "next" }, "Starting the next round"); });
+$("#r-restart").addEventListener("click", () => { if (confirm("Restart the current round?")) act("round", { action: "restart" }, "Restarting the round"); });
+$("#r-end1").addEventListener("click", () => endRound(1));
+$("#r-end2").addEventListener("click", () => endRound(2));
+$("#console-form").addEventListener("submit", sendConsole);
+
+refresh();
+loadStatus();
+setInterval(refresh, 4000);
+setInterval(loadStatus, 10000);

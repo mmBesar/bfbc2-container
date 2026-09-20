@@ -33,6 +33,8 @@
   server.
 - A small start script that turns environment variables into every config
   file, restarts a server if it stops, and shuts everything down cleanly.
+- A **web interface** (a small Go program) to see and manage the servers from a
+  browser: players, kick and ban, round control, settings, and a console.
 
 The game server files (about 440 MB) are **not** in the image. On first start
 the container downloads them once, checks their SHA256, and unpacks them into
@@ -101,6 +103,31 @@ The build downloads the pack and checks its SHA256, and the container still
 unpacks it into `./data/pack` on first start. Keep that image for your own use
 or push it to a registry of your own. Please do not publish it publicly.
 
+## Web interface
+
+Open `http://<this machine's IP>:5010` in a browser and log in (user `admin`,
+and the password you set with `WEB_PASSWORD`).
+
+- **Overview:** one card per server with its map, player count and state, and
+  whether the master server is running.
+- **Players:** the live player list with **Kick**, **Ban** (permanent, until the
+  round ends, or for a number of seconds), and moving a player to the other
+  team or to a squad.
+- **Round & map:** next round, restart, end the round with a winner, and the
+  server's map list.
+- **Settings:** switch hardcore, friendly fire, killcam and the others on or
+  off, and change the server name, description, password and more.
+- **Console:** send any RCON command by hand.
+
+Changes made in the web interface apply to the running server at once but are
+**not kept after a restart**, because the settings files are rebuilt from
+`docker-compose.yml` at every start. To make a change permanent, set it in
+Compose.
+
+The web interface talks to each server over RCON on `127.0.0.1`, so RCON never
+has to be opened to the network. It uses plain HTTP with a password: **keep it
+on your LAN or VPN**, or put it behind a reverse proxy with HTTPS.
+
 ## Connecting a client
 
 The game needs two small files in its install folder, next to the game
@@ -143,6 +170,16 @@ server from the list.
 Useful master keys: `LOG_CREATE`, `CONSOLE_LOG_LEVEL`, `ALL_STATS_UNLOCKED`,
 `ALL_ARE_VETERAN`, `PREMIUM_FOR_ALL`, `SPECACT_FOR_ALL`, `VIETNAM_FOR_ALL`,
 `ENABLE_SERVER_FILTERS`, `HTTP_ENABLED`, and the port settings.
+
+### Web interface
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `WEB_ENABLED` | `true` | Set `false` to turn the web interface off |
+| `WEB_PORT` | `5010` | Port of the web interface |
+| `WEB_USER` | `admin` | Login name |
+| `WEB_PASSWORD` | random | Login password. If not set, a random one is made once and saved in `/data/config/web-password`. |
+| `WEB_BIND` | `0.0.0.0` | Address the web interface listens on |
 
 ### Game servers
 
@@ -211,8 +248,8 @@ slots and accounts are kept. Back up this folder.
 
 The master listens on TCP 18390, 18395, 19021 and 19026 by default (and
 optionally 9946). Each game server needs its own game port. RCON is bound to
-`127.0.0.1` unless you change `RCON_BIND`.
-
+`127.0.0.1` unless you change `RCON_BIND`. The web interface uses TCP 5010
+by default (`WEB_PORT`).
 ## Troubleshooting
 
 | Problem | Likely cause and fix |
@@ -235,8 +272,8 @@ optionally 9946). Each game server needs its own game port. RCON is bound to
 - Host networking only.
 - The master's log timestamps show wrong hours and minutes (cosmetic, from the
   original program).
-- Not yet tested with a real game client. A web interface for managing the
-  servers is planned.
+- The web interface cannot yet start or stop a single server, edit the ban
+  list or the map list, or manage master accounts. These are planned.
 
 ## Tests and releases
 
@@ -246,7 +283,8 @@ tab.
 - **`test-aio`** builds the image, starts three servers from environment
   variables alone, and checks over RCON that the settings arrived, that
   `PUID`/`PGID`/`TZ` work, that all servers register with the master, and that a
-  restart is clean and does not download the pack again.
+  restart is clean and does not download the pack again. It also checks the
+  web interface (login, server list, and a command sent through it).
 - **`publish`** runs that whole test first, scans the image with Trivy (fails on
   any fixable CRITICAL vulnerability), and only then pushes the image to the
   GitHub Container Registry with an SBOM and build provenance. It finally checks
@@ -265,6 +303,7 @@ This project is only glue. All the hard work was done by others. Thank you!
 | **[Wine](https://www.winehq.org/)**, **[winetricks](https://github.com/Winetricks/winetricks)**, **[Debian](https://www.debian.org/)**, **[Xvfb](https://www.x.org/)** | Run the Windows game server on Linux. |
 | **[tini](https://github.com/krallin/tini)**, **[gosu](https://github.com/tianon/gosu)** | Correct process handling and the PUID/PGID user switch in the container. |
 | **[Trivy](https://github.com/aquasecurity/trivy)**, the **Docker GitHub Actions** | Vulnerability scanning and image builds in CI. |
+| **[Go](https://go.dev/)** | The web interface is written in Go using only its standard library. |
 
 Related projects I do not use, but which are worth knowing:
 [GrzybDev/BFBC2_MasterServer](https://github.com/GrzybDev/BFBC2_MasterServer)
