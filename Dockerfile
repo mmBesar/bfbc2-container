@@ -132,15 +132,6 @@ RUN useradd -m -u 1000 bfbc2 \
  && mkdir /data \
  && chown bfbc2:bfbc2 /data
 
-# The compiled master server
-COPY --from=build /bfbc2/src/bin/Release/mase_bc2 /opt/mase/mase_bc2
-
-# Our scripts
-COPY --chmod=755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY --chmod=755 scripts/start.sh      /usr/local/bin/start.sh
-COPY --chmod=755 scripts/fetch-pack.sh /usr/local/bin/fetch-pack
-COPY --chmod=644 scripts/lib.sh        /usr/local/lib/bfbc2/lib.sh
-
 # Build the Wine environment once, now, so containers start fast:
 #   - wineboot creates it
 #   - winetricks adds the Windows libraries the game server needs:
@@ -158,6 +149,18 @@ RUN WINEDEBUG=-all xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1
 
 # The entrypoint starts as root (to apply PUID/PGID/TZ), then drops to "bfbc2".
 USER root
+
+# The compiled master server and our scripts. These come AFTER the slow Wine
+# setup on purpose: changing a script then only rebuilds these last layers
+# instead of the whole Wine environment.
+# Note: COPY --chmod also applies to any folder it creates. The folder for
+# lib.sh must be readable by everyone, so lib.sh uses 755 too (it is only
+# read, not run, but 755 keeps its folder open).
+COPY --from=build /bfbc2/src/bin/Release/mase_bc2 /opt/mase/mase_bc2
+COPY --chmod=755 scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=755 scripts/start.sh      /usr/local/bin/start.sh
+COPY --chmod=755 scripts/fetch-pack.sh /usr/local/bin/fetch-pack
+COPY --chmod=755 scripts/lib.sh        /usr/local/lib/bfbc2/lib.sh
 
 # Defaults. Every one of these can be changed with environment variables.
 #   PACK_SHA256: SHA256 of the server pack (Bc2emu_V09.rar) that must be used.
