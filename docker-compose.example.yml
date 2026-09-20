@@ -1,84 +1,124 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 mmBesar
 # =============================================================================
-# BFBC2 all-in-one - example docker-compose.yml
+# BFBC2 all-in-one: docker-compose.yml
 #
-# Everything is controlled from this file. No config files to edit.
-# Full list of variables: see README.md.
+# This one file is all you need. Everything about the master server and every
+# game server is set with the environment variables below. There are no other
+# config files to edit.
 #
-# Requirements:
-#   - Linux on x86-64 (amd64). The game server is a 32-bit Windows program
-#     that runs under Wine, so ARM machines are not supported.
-#   - network_mode: host (port mapping breaks server registration).
+# HOW TO USE
+#   1. Change the lines marked  <-- CHANGE ME.
+#   2. Comment out (put a # in front of) any server you do not want.
+#   3. docker compose up -d       then     docker compose logs -f
+#
+# The first start downloads the game server files once (about 440 MB).
+# More detail for every variable: README.md
 # =============================================================================
 services:
   bfbc2:
-    # Or use "build: ." to build it locally instead.
     image: ghcr.io/mmbesar/bfbc2-container:latest
-    # build: .
+    # build: .                        # or build the image yourself from this repo
     container_name: bfbc2
     restart: unless-stopped
-    network_mode: host
-
+    network_mode: host                # required: port mapping breaks server registration
     volumes:
-      # Everything lives here: the server pack, every server's settings and
-      # bans, the master's accounts. Back this folder up.
-      - ./data:/data
+      - ./data:/data                  # everything is kept here. Back it up.
+      # Own copy of the server pack? Put Bc2emu_V09.rar in ./data and use PACK_FILE below.
 
     environment:
-      # ---- general ---------------------------------------------------------
-      PUID: "1000"               # files in ./data will belong to this user ID
-      PGID: "1000"               # ... and this group ID
-      TZ: "UTC"                  # for example Europe/Berlin
-
-      # ---- server pack (downloaded once into ./data/pack) --------------------
+      # ---- general ----------------------------------------------------------
+      PUID: "1000"                    # user ID that owns the files in ./data (run: id -u)
+      PGID: "1000"                    # group ID (run: id -g)
+      TZ: "UTC"                       # time zone, for example Europe/Berlin
       # PACK_FILE: "/data/Bc2emu_V09.rar"   # use your own copy instead of downloading
 
-      # ---- master server (the account + server list service) ----------------
-      # Any key from the master's config.ini works: MASTER_<KEY>, upper case.
-      MASTER_ENABLED: "true"
-      MASTER_HOST: "127.0.0.1"             # where the game servers find the master
-      MASTER_EMULATOR_IP: "0.0.0.0"        # address the master hands out (set to your LAN IP if clients cannot see servers)
-      MASTER_ALL_STATS_UNLOCKED: "true"    # everything unlocked for new players
-      MASTER_ALL_ARE_VETERAN: "true"
-      MASTER_PREMIUM_FOR_ALL: "true"
-      MASTER_VIETNAM_FOR_ALL: "true"
-      # MASTER_LOG_CREATE: "true"          # also write a log file into ./data/master
+      # ---- master server: accounts and the server list ----------------------
+      # Any setting of the master's config.ini works as MASTER_<NAME>, upper case.
+      MASTER_EMULATOR_IP: "192.168.1.10"      # <-- CHANGE ME: this machine's LAN IP
+      MASTER_ALL_STATS_UNLOCKED: "true"       # every weapon and gadget unlocked for new players
+      MASTER_ALL_ARE_VETERAN: "true"          # everyone gets veteran rank items
+      MASTER_PREMIUM_FOR_ALL: "true"          # everyone gets the premium edition items
+      MASTER_VIETNAM_FOR_ALL: "true"          # everyone may join Vietnam servers
+      MASTER_SPECACT_FOR_ALL: "false"         # everyone gets the SPECACT kits
+      # MASTER_LOG_CREATE: "true"             # also write a log file to ./data/master
+      # MASTER_ENABLED: "false"               # do not run a master here (use another one)
+      # MASTER_HOST: "127.0.0.1"              # where the servers look for the master
 
-      # ---- settings for EVERY game server (each can be overridden below) ----
-      SERVER_RCON_PASSWORD: "change-me"    # if you leave this out, a random one is created in ./data/config/rcon-password
-      SERVER_MAX_PLAYERS: "32"
+      # ---- defaults for EVERY game server -------------------------------------
+      # Any SERVER_<NAME> here can be overridden for one server as SERVER_<n>_<NAME>.
+      SERVER_RCON_PASSWORD: "change-me"       # <-- CHANGE ME: remote admin password
+      # SERVER_RCON_BIND: "0.0.0.0"           # let other PCs use RCON (default: this machine only)
+      SERVER_REGION: "OC"                     # region code shown to clients
+      SERVER_RANKED: "true"                   # false = unranked. Needed for game passwords.
+      SERVER_HARDCORE: "false"
       SERVER_FRIENDLY_FIRE: "false"
-      # SERVER_RCON_BIND: "0.0.0.0"        # let other machines use RCON (default is 127.0.0.1 = this machine only)
+      SERVER_TEAM_BALANCE: "true"
+      SERVER_KILLCAM: "true"
+      SERVER_MINIMAP: "true"
+      SERVER_CROSSHAIR: "true"
+      SERVER_SPOTTING_3D: "true"
+      SERVER_MINIMAP_SPOTTING: "true"
 
-      # ---- game server 1: Rush ------------------------------------------------
-      # A server exists as soon as SERVER_<n>_TYPE is set.
-      # Types: rush, conq, sqdm, sqrush, vietrush, vietconq, vietsqdm, vietsqrush
+      # =======================================================================
+      # GAME SERVERS  (Each one needs at least TYPE. Comment out what you don't want.)
+      # Ports are automatic: game port 19567 + (n-1), RCON port 48888 + (n-1).
+      # Each running server uses roughly 100-200 MB of RAM.
+      # =======================================================================
+
+      # ---- Bad Company 2 ------------------------------------------------------
       SERVER_1_TYPE: "rush"
-      SERVER_1_NAME: "My Rush Server"
-      # Ports default to 19567 + (n-1) for the game and 48888 + (n-1) for RCON.
-      # SERVER_1_PORT: "19567"
-      # SERVER_1_RCON_PORT: "48888"
-      # SERVER_1_GAME_PASSWORD: "letmein"
-      # SERVER_1_DESCRIPTION: "Welcome!"
+      SERVER_1_NAME: "BFBC2 Rush"
+      SERVER_1_MAX_PLAYERS: "32"
 
-      # ---- game server 2: Squad Deathmatch, hardcore -----------------------------
-      SERVER_2_TYPE: "sqdm"
-      SERVER_2_NAME: "My SQDM Server"
-      SERVER_2_MAX_PLAYERS: "16"
-      SERVER_2_HARDCORE: "true"
-      # SERVER_2_MAPLIST: "mp_001sdm, mp_004sdm"    # your own map list (default: the pack's own)
+      SERVER_2_TYPE: "conq"
+      SERVER_2_NAME: "BFBC2 Conquest"
+      SERVER_2_MAX_PLAYERS: "32"
 
-      # ---- game server 3: Vietnam Conquest ----------------------------------------
-      # SERVER_3_TYPE: "vietconq"
-      # SERVER_3_NAME: "My Vietnam Server"
+      SERVER_3_TYPE: "sqdm"
+      SERVER_3_NAME: "BFBC2 Squad Deathmatch"
+      SERVER_3_MAX_PLAYERS: "16"
 
-      # ---- anything else, for any server --------------------------------------------
-      # SERVER_2_OPT_Ranked: "false"          # any key of that server's ServerOptions.ini
-      # SERVER_2_VAR_idleTimeout: "300"       # any "vars.<name>" startup setting
-      # SERVER_2_STARTUP: "admin.say Hello"   # extra raw startup lines
-      # SERVER_2_EXTRA_ARGS: ""               # extra command line arguments for the server program
+      SERVER_4_TYPE: "sqrush"
+      SERVER_4_NAME: "BFBC2 Squad Rush"
+      SERVER_4_MAX_PLAYERS: "16"
 
-      # ---- gameplay options shared by all servers ------------------------------------
+      # ---- Vietnam ---------------------------------------------------------------
+      SERVER_5_TYPE: "vietrush"
+      SERVER_5_NAME: "BFBC2 Vietnam Rush"
+      SERVER_5_MAX_PLAYERS: "32"
+
+      SERVER_6_TYPE: "vietconq"
+      SERVER_6_NAME: "BFBC2 Vietnam Conquest"
+      SERVER_6_MAX_PLAYERS: "32"
+
+      SERVER_7_TYPE: "vietsqdm"
+      SERVER_7_NAME: "BFBC2 Vietnam Squad Deathmatch"
+      SERVER_7_MAX_PLAYERS: "16"
+
+      SERVER_8_TYPE: "vietsqrush"
+      SERVER_8_NAME: "BFBC2 Vietnam Squad Rush"
+      SERVER_8_MAX_PLAYERS: "16"
+
+      # ---- more settings for any server (shown for server 1; use any number) ---------
+      # SERVER_1_GAME_PASSWORD: "letmein"      # password to join (needs SERVER_1_RANKED: "false")
+      # SERVER_1_RANKED: "false"
+      # SERVER_1_DESCRIPTION: "Welcome!"       # server description
+      # SERVER_1_MAPLIST: "mp_002, mp_004"     # your own map list (default: all maps of that mode)
+      # SERVER_1_PORT: "19567"                 # game port (default shown)
+      # SERVER_1_RCON_PORT: "48888"            # remote admin port (default shown)
+      # SERVER_1_RCON_PASSWORD: "other-pw"     # own RCON password for this server
+      # SERVER_1_BANNER_URL: "http://.../banner.png"   # server banner image (512x64 PNG)
+
+      # ---- anything else -----------------------------------------------------------------
+      # SERVER_1_OPT_<Key>: "value"            # any key of that server's ServerOptions.ini
+      # SERVER_1_VAR_idleTimeout: "300"        # any "vars.<name>" startup setting
+      # SERVER_1_STARTUP: "admin.say Hello"    # extra raw startup lines (one per line)
+      # SERVER_1_EXTRA_ARGS: ""                # extra command line arguments for the server program
+
+      # ---- gameplay options shared by ALL servers ------------------------------------------
       # HOOK_INSTANT_SPAWN: "0"
       # HOOK_UNLIMITED_AMMO: "0"
+      # HOOK_HEALTH_MODE: "0"
+      # HOOK_DESERTING_ALLOWED: "0"
+      # HOOK_RANKING_MIN_PLAYERS: "1"

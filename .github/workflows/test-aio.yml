@@ -110,7 +110,7 @@ jobs:
         continue-on-error: true
         run: |
           python3 - <<'PY'
-          import hashlib, socket, struct, time
+          import hashlib, socket, struct, sys, time, traceback
 
           HOST, PASSWORD = "127.0.0.1", "testpass123"
 
@@ -169,50 +169,79 @@ jobs:
               if not ok:
                   failures.append(label)
 
+          def check_soon(label, getter, test, expected_text, seconds=20):
+              # Settings from the startup script may be applied a few seconds
+              # after the server starts accepting connections. Give them time.
+              deadline = time.time() + seconds
+              while True:
+                  actual = getter()
+                  if test(actual) or time.time() > deadline:
+                      break
+                  time.sleep(2)
+              check(label, actual, test, expected_text)
+
+          def has_password_now(rcon):
+              inf = rcon.call("serverInfo")
+              return inf[inf.index("AcceptingPlayers") + 3]
+
+          def wait_ready(rcon, seconds=90):
+              # The RCON port opens before the server is fully up.
+              deadline = time.time() + seconds
+              info = []
+              while time.time() < deadline:
+                  info = rcon.call("serverInfo")
+                  if "AcceptingPlayers" in info:
+                      return info
+                  time.sleep(2)
+              raise RuntimeError("never reached AcceptingPlayers; last serverInfo: %r" % (info,))
+
           for name, port in [("server 1 (rush)", 48888), ("server 2 (sqdm)", 48889), ("server 3 (vietrush)", 48890)]:
               print("=====", name, "RCON port", port)
-              for attempt in range(5):
-                  try:
-                      rcon = Rcon(port)
-                      break
-                  except Exception as err:
-                      print("  login attempt", attempt + 1, "failed:", err)
-                      time.sleep(3)
-              else:
-                  failures.append(name + " login")
-                  continue
+              try:
+                  for attempt in range(5):
+                      try:
+                          rcon = Rcon(port)
+                          break
+                      except Exception as err:
+                          print("  login attempt", attempt + 1, "failed:", err)
+                          time.sleep(3)
+                  else:
+                      raise RuntimeError("could not log in over RCON")
 
-              info = rcon.call("serverInfo")
-              print("  serverInfo:", info)
-              # After the online state come: ranked, punkbuster, has-game-password.
-              i = info.index("AcceptingPlayers")
-              ranked, has_password = info[i + 1], info[i + 3]
+                  info = wait_ready(rcon)
+                  print("  serverInfo:", info)
+                  i = info.index("AcceptingPlayers")
+                  ranked, has_password = info[i + 1], info[i + 3]
 
-              if port == 48888:
-                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Rush", "Test Rush")
-                  check("max players",   info[3],                            lambda v: v == "24", "24 (global SERVER_MAX_PLAYERS)")
-                  check("ranked",        ranked,                             lambda v: v == "false", "false (SERVER_1_RANKED)")
-                  check("game password", rcon.get("vars.gamePassword"),      lambda v: v == "abc123", "abc123")
-                  check("has password",  has_password,                       lambda v: v == "true", "true")
-                  check("description",   rcon.get("vars.serverDescription"), lambda v: "Hello" in v and "World" in v, "contains Hello and World")
-                  check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: v.startswith("levels/mp_002"), "levels/mp_002")
-              elif port == 48889:
-                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test SQDM", "Test SQDM")
-                  check("max players",   info[3],                            lambda v: v == "16", "16 (SERVER_2_MAX_PLAYERS beats the global 24)")
-                  check("hardcore",      rcon.get("vars.hardCore"),          lambda v: v == "true", "true")
-                  check("idleTimeout",   rcon.get("vars.idleTimeout"),       lambda v: v == "123", "123 (from SERVER_2_VAR_idleTimeout)")
-                  # Exploration, not a pass/fail check: can a game password be set at
-                  # run time on this RANKED server?
-                  print("  [explore] ranked =", ranked, "| has password before:", has_password)
-                  print("  [explore] set password:", rcon.call("vars.gamePassword", "zzz999"))
-                  print("  [explore] read back:   ", rcon.call("vars.gamePassword"))
-                  info2 = rcon.call("serverInfo")
-                  print("  [explore] has password after:", info2[info2.index("AcceptingPlayers") + 3])
-              else:
-                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Vietnam Rush", "Test Vietnam Rush")
-                  check("max players",   info[3],                            lambda v: v == "24", "24 (global SERVER_MAX_PLAYERS)")
-                  check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: "nam_mp" in v, "a Vietnam map (nam_mp...)")
-                  check("game mod",      "VIETNAM" if "VIETNAM" in info else "BC2", lambda v: v == "VIETNAM", "VIETNAM")
+                  if port == 48888:
+                      check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Rush", "Test Rush")
+                      check("max players",   info[3],                            lambda v: v == "24", "24 (global SERVER_MAX_PLAYERS)")
+                      check("ranked",        ranked,                             lambda v: v == "false", "false (SERVER_1_RANKED)")
+                      check_soon("game password", lambda: rcon.get("vars.gamePassword"), lambda v: v == "abc123", "abc123")
+                      check_soon("has password",  lambda: has_password_now(rcon), lambda v: v == "true", "true")
+                      check_soon("description",   lambda: rcon.get("vars.serverDescription"), lambda v: "Hello" in v and "World" in v, "contains Hello and World")
+                      check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: v.startswith("levels/mp_002"), "levels/mp_002")
+                  elif port == 48889:
+                      check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test SQDM", "Test SQDM")
+                      check("max players",   info[3],                            lambda v: v == "16", "16 (SERVER_2_MAX_PLAYERS beats the global 24)")
+                      check_soon("hardcore",     lambda: rcon.get("vars.hardCore"),    lambda v: v == "true", "true")
+                      check_soon("idleTimeout",  lambda: rcon.get("vars.idleTimeout"), lambda v: v == "123", "123 (from SERVER_2_VAR_idleTimeout)")
+                      # Exploration, not a pass/fail check: can a game password be set at
+                      # run time on this RANKED server?
+                      print("  [explore] ranked =", ranked, "| has password before:", has_password)
+                      print("  [explore] set password:", rcon.call("vars.gamePassword", "zzz999"))
+                      print("  [explore] read back:   ", rcon.call("vars.gamePassword"))
+                      print("  [explore] has password after:", has_password_now(rcon))
+                  else:
+                      check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Vietnam Rush", "Test Vietnam Rush")
+                      check("max players",   info[3],                            lambda v: v == "24", "24 (global SERVER_MAX_PLAYERS)")
+                      check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: "nam_mp" in v, "a Vietnam map (nam_mp...)")
+                      check("game mod",      "VIETNAM" if "VIETNAM" in info else "BC2", lambda v: v == "VIETNAM", "VIETNAM")
+              except Exception:
+                  # A crash in the test itself must show up as a clear FAIL, not a wall of text.
+                  print("FAIL  %s: the check could not finish:" % name)
+                  traceback.print_exc(file=sys.stdout)
+                  failures.append(name)
 
           print()
           if failures:

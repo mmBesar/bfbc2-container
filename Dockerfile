@@ -143,13 +143,16 @@ RUN useradd -m -u 1000 bfbc2 \
 #     2005, 2008 and 2010.
 # WINEDEBUG=-all keeps the build log quiet.
 # "wineserver -w" waits until Wine has finished writing its settings.
+# The last step deletes winetricks' download cache (the installers it used).
+# They are not needed any more and would only make the image bigger.
 USER bfbc2
 ENV WINEARCH=win32 \
     WINEPREFIX=/home/bfbc2/.wine32
 RUN WINEDEBUG=-all xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1024x24" wineboot \
  && WINEDEBUG=-all xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1024x24" \
         winetricks -q dinput8 vcrun2005 vcrun2008 vcrun2010 \
- && wineserver -w
+ && wineserver -w \
+ && rm -rf /home/bfbc2/.cache/winetricks
 
 # The entrypoint starts as root (to apply PUID/PGID/TZ), then drops to "bfbc2".
 USER root

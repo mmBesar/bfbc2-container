@@ -49,35 +49,22 @@ the container downloads them once, checks their SHA256, and unpacks them into
 
 ## Quick start
 
-```yaml
-services:
-  bfbc2:
-    image: ghcr.io/mmbesar/bfbc2-container:latest
-    container_name: bfbc2
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./data:/data
-    environment:
-      PUID: "1000"
-      PGID: "1000"
-      TZ: "UTC"
-      MASTER_EMULATOR_IP: "192.168.1.10"     # this machine's LAN IP
-      SERVER_RCON_PASSWORD: "change-me"
-      SERVER_1_TYPE: "rush"
-      SERVER_1_NAME: "My Rush Server"
-      SERVER_2_TYPE: "sqdm"
-      SERVER_2_NAME: "My SQDM Server"
-```
+The repository's [`docker-compose.yml`](docker-compose.yml) is the whole
+manual in one file: every option is there, with a short comment. By default it
+starts **all eight server types** (four Bad Company 2 modes and four Vietnam
+modes). Comment out the ones you do not want.
 
-```sh
-docker compose up -d
-docker compose logs -f
-```
+1. Copy `docker-compose.yml` to your machine.
+2. Change the two lines marked `<-- CHANGE ME` (your LAN IP and an RCON
+   password).
+3. Start it:
 
-The first start takes a few minutes while the server pack downloads. A fuller
-file with every option explained is in
-[`docker-compose.example.yml`](docker-compose.example.yml).
+   ```sh
+   docker compose up -d
+   docker compose logs -f
+   ```
+
+The first start takes a few minutes while the server pack downloads.
 
 ### Use your own copy of the server pack
 
