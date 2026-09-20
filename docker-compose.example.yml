@@ -1,0 +1,82 @@
+# =============================================================================
+# BFBC2 all-in-one - example docker-compose.yml
+#
+# Everything is controlled from this file. No config files to edit.
+# Full list of variables: see README.md.
+#
+# Requirements:
+#   - Linux on x86-64 (amd64). The game server is a 32-bit Windows program
+#     that runs under Wine, so ARM machines are not supported.
+#   - network_mode: host (port mapping breaks server registration).
+# =============================================================================
+services:
+  bfbc2:
+    # Change this to your own image name, or use "build: ." to build locally.
+    image: ghcr.io/mmbesar/bfbc2-aio:latest
+    # build: .
+    container_name: bfbc2
+    restart: unless-stopped
+    network_mode: host
+
+    volumes:
+      # Everything lives here: the server pack, every server's settings and
+      # bans, the master's accounts. Back this folder up.
+      - ./data:/data
+
+    environment:
+      # ---- general ---------------------------------------------------------
+      PUID: "1000"               # files in ./data will belong to this user ID
+      PGID: "1000"               # ... and this group ID
+      TZ: "UTC"                  # for example Europe/Berlin
+
+      # ---- server pack (downloaded once into ./data/pack) --------------------
+      # PACK_FILE: "/data/Bc2emu_V09.rar"   # use your own copy instead of downloading
+
+      # ---- master server (the account + server list service) ----------------
+      # Any key from the master's config.ini works: MASTER_<KEY>, upper case.
+      MASTER_ENABLED: "true"
+      MASTER_HOST: "127.0.0.1"             # where the game servers find the master
+      MASTER_EMULATOR_IP: "0.0.0.0"        # address the master hands out (set to your LAN IP if clients cannot see servers)
+      MASTER_ALL_STATS_UNLOCKED: "true"    # everything unlocked for new players
+      MASTER_ALL_ARE_VETERAN: "true"
+      MASTER_PREMIUM_FOR_ALL: "true"
+      MASTER_VIETNAM_FOR_ALL: "true"
+      # MASTER_LOG_CREATE: "true"          # also write a log file into ./data/master
+
+      # ---- settings for EVERY game server (each can be overridden below) ----
+      SERVER_RCON_PASSWORD: "change-me"    # if you leave this out, a random one is created in ./data/config/rcon-password
+      SERVER_MAX_PLAYERS: "32"
+      SERVER_FRIENDLY_FIRE: "false"
+      # SERVER_RCON_BIND: "0.0.0.0"        # let other machines use RCON (default is 127.0.0.1 = this machine only)
+
+      # ---- game server 1: Rush ------------------------------------------------
+      # A server exists as soon as SERVER_<n>_TYPE is set.
+      # Types: rush, conq, sqdm, sqrush, vietrush, vietconq, vietsqdm, vietsqrush
+      SERVER_1_TYPE: "rush"
+      SERVER_1_NAME: "My Rush Server"
+      # Ports default to 19567 + (n-1) for the game and 48888 + (n-1) for RCON.
+      # SERVER_1_PORT: "19567"
+      # SERVER_1_RCON_PORT: "48888"
+      # SERVER_1_GAME_PASSWORD: "letmein"
+      # SERVER_1_DESCRIPTION: "Welcome!"
+
+      # ---- game server 2: Squad Deathmatch, hardcore -----------------------------
+      SERVER_2_TYPE: "sqdm"
+      SERVER_2_NAME: "My SQDM Server"
+      SERVER_2_MAX_PLAYERS: "16"
+      SERVER_2_HARDCORE: "true"
+      # SERVER_2_MAPLIST: "mp_001sdm, mp_004sdm"    # your own map list (default: the pack's own)
+
+      # ---- game server 3: Vietnam Conquest ----------------------------------------
+      # SERVER_3_TYPE: "vietconq"
+      # SERVER_3_NAME: "My Vietnam Server"
+
+      # ---- anything else, for any server --------------------------------------------
+      # SERVER_2_OPT_Ranked: "false"          # any key of that server's ServerOptions.ini
+      # SERVER_2_VAR_idleTimeout: "300"       # any "vars.<name>" startup setting
+      # SERVER_2_STARTUP: "admin.say Hello"   # extra raw startup lines
+      # SERVER_2_EXTRA_ARGS: ""               # extra command line arguments for the server program
+
+      # ---- gameplay options shared by all servers ------------------------------------
+      # HOOK_INSTANT_SPAWN: "0"
+      # HOOK_UNLIMITED_AMMO: "0"

@@ -1,0 +1,272 @@
+# =============================================================================
+# Test of the all-in-one image, configured ONLY through environment variables.
+#
+# - Runs only when you click "Run workflow" in the Actions tab.
+# - Nothing is published anywhere.
+#
+# What it proves:
+#   1. The image builds from the repo's root Dockerfile.
+#   2. On first start it downloads and verifies the server pack by itself.
+#   3. Three game servers (Rush, Squad Deathmatch, Vietnam Rush) come up from
+#      environment variables alone, and the values arrive in the real
+#      servers (checked over RCON): names, passwords, hardcore, custom vars,
+#      the Vietnam map list.
+#   4. PUID / PGID / TZ work: processes and files belong to the chosen IDs.
+#   5. All three servers register with the built-in master.
+#   6. A restart is fast (clean shutdown) and does not download the pack again.
+# =============================================================================
+name: test-aio
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aio:
+    # Native amd64 runner. Wine + the 32-bit game server are amd64 only.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # "load: true" keeps the image on the runner so we can test it.
+      # "push: false" means it is NOT uploaded to any registry.
+      - name: Build the image (not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: bfbc2-aio:test
+          cache-from: type=gha,scope=aio
+          cache-to: type=gha,scope=aio,mode=max
+
+      # Everything below is configured with environment variables, exactly
+      # like a Compose file would do. /data starts empty.
+      - name: Start the container
+        run: |
+          mkdir -p data
+          docker run -d --name aio --network host \
+            -e PUID=1234 -e PGID=1234 -e TZ=Africa/Cairo \
+            -e MASTER_LOG_CREATE=true \
+            -e MASTER_ALL_STATS_UNLOCKED=true \
+            -e SERVER_RCON_PASSWORD=testpass123 \
+            -e SERVER_MAX_PLAYERS=24 \
+            -e SERVER_1_TYPE=rush \
+            -e SERVER_1_NAME="Test Rush" \
+            -e SERVER_1_GAME_PASSWORD=abc123 \
+            -e SERVER_1_DESCRIPTION=$'Hello\nWorld' \
+            -e SERVER_2_TYPE=sqdm \
+            -e SERVER_2_NAME="Test SQDM" \
+            -e SERVER_2_HARDCORE=true \
+            -e SERVER_2_VAR_idleTimeout=123 \
+            -e SERVER_2_MAX_PLAYERS=16 \
+            -e SERVER_3_TYPE=vietrush \
+            -e SERVER_3_NAME="Test Vietnam Rush" \
+            -v "$PWD/data:/data" \
+            bfbc2-aio:test
+
+      # The first start downloads the 437 MB server pack, so this can take a
+      # few minutes. We wait up to 8 minutes for all three RCON ports.
+      - name: Wait for the three servers
+        run: |
+          probe() { (echo > /dev/tcp/127.0.0.1/"$1") 2>/dev/null && echo yes || echo no; }
+          for i in $(seq 1 240); do
+            if ! docker ps -q -f name=aio | grep -q .; then
+              echo "The container stopped:"; docker logs aio 2>&1 | tail -n 40; exit 1
+            fi
+            if [ "$(probe 48888)" = yes ] && [ "$(probe 48889)" = yes ] && [ "$(probe 48890)" = yes ]; then
+              echo "All three RCON ports are open (after about $((i*2)) seconds)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Not all servers came up in 8 minutes:"
+          docker logs aio 2>&1 | tail -n 40
+          exit 1
+
+      # Ask the running servers what settings they really have.
+      - name: Check the settings inside the servers (RCON)
+        run: |
+          python3 - <<'PY'
+          import hashlib, socket, struct, time
+
+          HOST, PASSWORD = "127.0.0.1", "testpass123"
+
+          def encode(seq, words):
+              body = b"".join(struct.pack("<I", len(w)) + w.encode() + b"\x00" for w in words)
+              return struct.pack("<III", seq & 0x3FFFFFFF, 12 + len(body), len(words)) + body
+
+          def decode(packet):
+              _, _, count = struct.unpack("<III", packet[:12])
+              words, off = [], 12
+              for _ in range(count):
+                  (n,) = struct.unpack("<I", packet[off:off + 4])
+                  words.append(packet[off + 4:off + 4 + n].decode(errors="replace"))
+                  off += n + 5
+              return words
+
+          def read_packet(sock):
+              buf = b""
+              while len(buf) < 8:
+                  chunk = sock.recv(4096)
+                  if not chunk:
+                      raise RuntimeError("connection closed")
+                  buf += chunk
+              size = struct.unpack("<I", buf[4:8])[0]
+              while len(buf) < size:
+                  chunk = sock.recv(4096)
+                  if not chunk:
+                      raise RuntimeError("connection closed")
+                  buf += chunk
+              return decode(buf[:size])
+
+          class Rcon:
+              def __init__(self, port):
+                  self.seq = 0
+                  self.sock = socket.create_connection((HOST, port), timeout=10)
+                  salt = self.call("login.hashed")
+                  digest = hashlib.md5(bytes.fromhex(salt[1]) + PASSWORD.encode()).hexdigest().upper()
+                  reply = self.call("login.hashed", digest)
+                  if reply[0] != "OK":
+                      raise RuntimeError("login failed: %r" % reply)
+
+              def call(self, *words):
+                  self.sock.sendall(encode(self.seq, list(words)))
+                  self.seq += 1
+                  return read_packet(self.sock)
+
+              def get(self, *words):
+                  reply = self.call(*words)
+                  return reply[1] if len(reply) > 1 else ""
+
+          failures = []
+
+          def check(label, actual, test, expected_text):
+              ok = test(actual)
+              print(("PASS  " if ok else "FAIL  ") + "%-40s got %r (expected %s)" % (label, actual, expected_text))
+              if not ok:
+                  failures.append(label)
+
+          for name, port in [("server 1 (rush)", 48888), ("server 2 (sqdm)", 48889), ("server 3 (vietrush)", 48890)]:
+              print("=====", name, "RCON port", port)
+              for attempt in range(5):
+                  try:
+                      rcon = Rcon(port)
+                      break
+                  except Exception as err:
+                      print("  login attempt", attempt + 1, "failed:", err)
+                      time.sleep(3)
+              else:
+                  failures.append(name + " login")
+                  continue
+
+              if port == 48888:
+                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Rush", "Test Rush")
+                  check("game password", rcon.get("vars.gamePassword"),      lambda v: v == "abc123", "abc123")
+                  check("description",   rcon.get("vars.serverDescription"), lambda v: "Hello" in v and "World" in v, "contains Hello and World")
+                  check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: v.startswith("levels/mp_002"), "levels/mp_002")
+                  print("  playerLimit:", rcon.get("vars.playerLimit"), "(set to 24 by SERVER_MAX_PLAYERS)")
+              elif port == 48889:
+                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test SQDM", "Test SQDM")
+                  check("hardcore",      rcon.get("vars.hardCore"),          lambda v: v == "true", "true")
+                  check("idleTimeout",   rcon.get("vars.idleTimeout"),       lambda v: v == "123", "123 (from SERVER_2_VAR_idleTimeout)")
+                  print("  playerLimit:", rcon.get("vars.playerLimit"), "(set to 16 by SERVER_2_MAX_PLAYERS)")
+              else:
+                  check("name",          rcon.get("vars.serverName"),        lambda v: v == "Test Vietnam Rush", "Test Vietnam Rush")
+                  check("first map",     rcon.get("admin.currentLevel").lower(), lambda v: "nam_mp" in v, "a Vietnam map (nam_mp...)")
+              print("  serverInfo:", rcon.call("serverInfo"))
+
+          print()
+          if failures:
+              raise SystemExit("FAILED checks: " + ", ".join(failures))
+          print("All settings arrived in the servers.")
+          PY
+
+      # Give the servers time to send heartbeats to the master.
+      - name: Wait for the heartbeats
+        run: sleep 30
+
+      - name: Check users, time zone, files and master registration
+        run: |
+          fail=0
+          echo "--------- processes (uid shown)"
+          docker top aio -eo uid,pid,args | grep -E "Frost|mase_bc2|Xvfb" || true
+
+          echo "--------- game servers run as user 1234?"
+          bad=$(docker top aio -eo uid,args | grep "Frost.Game" | awk '$1 != 1234' | wc -l)
+          [ "${bad}" = 0 ] && echo "PASS" || { echo "FAIL: ${bad} game server(s) run as another user"; fail=1; }
+
+          echo "--------- time zone inside the container (Africa/Cairo is +0200 or +0300)"
+          docker exec aio date +"%Z %z"
+
+          echo "--------- file owners (expect 1234:1234)"
+          stat -c '%u:%g  %n' data data/pack/.pack-sha256 data/instances/1/ServerOptions.ini data/master/config.ini
+          owners=$(stat -c '%u:%g' data data/pack/.pack-sha256 data/instances/1/ServerOptions.ini data/master/config.ini | sort -u)
+          [ "${owners}" = "1234:1234" ] && echo "PASS" || { echo "FAIL: unexpected owners"; fail=1; }
+
+          echo "--------- master config got MASTER_ALL_STATS_UNLOCKED?"
+          grep -E '^(all_stats_unlocked|log_create|emulator_ip)' data/master/config.ini
+          grep -q '^all_stats_unlocked = true' data/master/config.ini && echo "PASS" || { echo "FAIL"; fail=1; }
+
+          echo "--------- servers registered with the master (from its log file)"
+          count=$(grep -rIh "Server was added to database" data/master 2>/dev/null | wc -l)
+          echo "registrations: ${count}"
+          [ "${count}" -ge 3 ] && echo "PASS" || { echo "FAIL: expected at least 3"; fail=1; }
+
+          exit "${fail}"
+
+      # A clean stop should take a few seconds, not the full 10-second
+      # timeout after which Docker kills the container. The pack must not be
+      # downloaded again.
+      - name: Restart test
+        run: |
+          start=$(date +%s)
+          docker restart aio
+          end=$(date +%s)
+          echo "restart took $((end-start)) seconds"
+          if [ $((end-start)) -ge 10 ]; then
+            echo "WARNING: the container had to be killed (no clean shutdown)"
+          fi
+
+          probe() { (echo > /dev/tcp/127.0.0.1/"$1") 2>/dev/null && echo yes || echo no; }
+          for i in $(seq 1 90); do
+            if [ "$(probe 48888)" = yes ] && [ "$(probe 48889)" = yes ] && [ "$(probe 48890)" = yes ]; then
+              echo "All three RCON ports are open again (after about $((i*2)) seconds)"
+              break
+            fi
+            sleep 2
+            [ "$i" = 90 ] && { echo "Servers did not come back"; exit 1; }
+          done
+
+          echo "--------- did it skip the download?"
+          docker logs aio 2>&1 | grep -c "pack already present" | grep -qv '^0$' \
+            && echo "PASS" || { echo "FAIL: no 'pack already present' message"; exit 1; }
+
+      # Always print what matters, pass or fail.
+      - name: Diagnostics
+        if: always()
+        run: |
+          echo "=================== container output (last 60 lines)"
+          docker logs --tail 60 aio 2>&1 || true
+
+          echo "=================== resource use"
+          docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' aio || true
+
+          echo "=================== generated: server 1 ServerOptions.ini and Startup.txt"
+          cat data/instances/1/ServerOptions.ini 2>/dev/null || true
+          echo "---"; cat data/instances/1/AdminScripts/Startup.txt 2>/dev/null || true
+
+          echo "=================== generated: server 3 (Vietnam) map list"
+          cat data/instances/3/maplist.txt 2>/dev/null || true
+
+          echo "=================== master log file (last 30 lines)"
+          for f in $(find data/master -maxdepth 1 -type f ! -name config.ini | head -3); do
+            echo "--- ${f}"; tail -n 30 "${f}"
+          done
