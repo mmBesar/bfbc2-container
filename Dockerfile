@@ -150,6 +150,11 @@ RUN WINEDEBUG=-all xvfb-run -e /dev/stdout -a -s "-nolisten tcp -screen 0 1280x1
 # The entrypoint starts as root (to apply PUID/PGID/TZ), then drops to "bfbc2".
 USER root
 
+# The Wine setup above leaves files in /tmp that belong to user 1000. If you
+# run with another PUID, Wine would find them and fail with "Permission
+# denied". So empty /tmp now. (The entrypoint also cleans it at every start.)
+RUN rm -rf /tmp/* /tmp/.[!.]* || true
+
 # The compiled master server and our scripts. These come AFTER the slow Wine
 # setup on purpose: changing a script then only rebuilds these last layers
 # instead of the whole Wine environment.

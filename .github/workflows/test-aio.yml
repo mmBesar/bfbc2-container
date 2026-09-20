@@ -256,6 +256,10 @@ jobs:
           echo "=================== container output (last 60 lines)"
           docker logs --tail 60 aio 2>&1 || true
 
+          echo "=================== inside the container: user and /tmp"
+          docker exec aio id || true
+          docker exec aio ls -la /tmp || true
+
           echo "=================== resource use"
           docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' aio || true
 

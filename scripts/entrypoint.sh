@@ -17,6 +17,11 @@ PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 DATA_DIR="${DATA_DIR:-/data}"
 
+# Clean up leftovers from an earlier run. /tmp survives "docker restart", and
+# old Wine or fake-screen files (owned by another user ID, or left behind by a
+# killed run) would block the new start. Nothing is running yet, so this is safe.
+rm -rf /tmp/wine-* /tmp/.wine-* /tmp/.X99-lock /tmp/.X11-unix/X99 /tmp/aio-stopping 2>/dev/null || true
+
 if [ "$(id -u)" != 0 ]; then
     echo "[aio] running as user $(id -u):$(id -g); PUID/PGID/TZ are ignored"
     exec /usr/local/bin/start.sh "$@"
