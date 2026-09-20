@@ -55,8 +55,8 @@ starts **all eight server types** (four Bad Company 2 modes and four Vietnam
 modes). Comment out the ones you do not want.
 
 1. Copy `docker-compose.yml` to your machine.
-2. Change the two lines marked `<-- CHANGE ME` (your LAN IP and an RCON
-   password).
+2. Change the line marked `<-- CHANGE ME` (the RCON password: letters and
+   digits only).
 3. Start it:
 
    ```sh
@@ -135,7 +135,10 @@ server from the list.
 | `MASTER_ENABLED` | `true` | Set `false` to run only game servers (they then look for a master elsewhere) |
 | `MASTER_HOST` | `127.0.0.1` | Where the game servers find the master |
 | `MASTER_<KEY>` | | Any setting of the master's `config.ini`, in upper case. Example: `MASTER_ALL_STATS_UNLOCKED=true` sets `all_stats_unlocked = true`. Unknown keys are reported in the log. |
-| `MASTER_EMULATOR_IP` | `0.0.0.0` | Address the master hands out to clients. Set it to your LAN IP if clients cannot see servers. |
+| `MASTER_EMULATOR_IP` | this machine's LAN address, found automatically | Address the master tells clients to connect to. Set it yourself only if the detected address is wrong. **Never use `0.0.0.0`**: clients can then not log in. |
+| `MASTER_LOG_CREATE` | `true` | Write the master's log file (`./data/master/logfile.log`) |
+| `MASTER_FILE_LOG_LEVEL` | `1` | Log detail from 1 (connections) to 3 (everything). Use 3 when debugging. |
+| `MASTER_LOG_TO_CONSOLE` | `true` | Also show the master's log file in `docker logs` |
 
 Useful master keys: `LOG_CREATE`, `CONSOLE_LOG_LEVEL`, `ALL_STATS_UNLOCKED`,
 `ALL_ARE_VETERAN`, `PREMIUM_FOR_ALL`, `SPECACT_FOR_ALL`, `VIETNAM_FOR_ALL`,
@@ -156,7 +159,7 @@ The keys marked "per server only" have no global form.
 | `PORT` (per server only) | `19567 + (n-1)` | Game port |
 | `RCON_PORT` (per server only) | `48888 + (n-1)` | Remote admin port |
 | `RCON_BIND` | `127.0.0.1` | Address RCON listens on. Use `0.0.0.0` to allow other machines. |
-| `RCON_PASSWORD` | random | Remote admin password. If no server has one, a random one is made once and saved in `/data/config/rcon-password`. |
+| `RCON_PASSWORD` | random | Remote admin password: **letters and digits only** (the game refuses anything else and stops). If no server has one, a random one is made once and saved in `/data/config/rcon-password`. |
 | `MAX_PLAYERS` | `16` | Player slots |
 | `PUNKBUSTER` | `false` | |
 | `RANKED` | `true` | |
@@ -209,6 +212,15 @@ slots and accounts are kept. Back up this folder.
 The master listens on TCP 18390, 18395, 19021 and 19026 by default (and
 optionally 9946). Each game server needs its own game port. RCON is bound to
 `127.0.0.1` unless you change `RCON_BIND`.
+
+## Troubleshooting
+
+| Problem | Likely cause and fix |
+|---|---|
+| I can create an account but not log in | The master tells the client where to connect next using `MASTER_EMULATOR_IP`. It must be this machine's real LAN address (never `0.0.0.0`, never a made-up one). Check `emulator_ip` in `./data/master/config.ini`. |
+| I can log in but the server list is empty | The game servers did not register. Look at the end of `./data/instances/1/RuntimeLog_*.log` (newest file) for a line with `FatalAssert`. A common cause is an RCON password with a dash, space or symbol: use letters and digits only. |
+| Nothing in `docker logs` from the master | The master's log file is shown there at level 1. Set `MASTER_FILE_LOG_LEVEL: "3"` for full detail, or read `./data/master/logfile.log`. |
+| I want to see what a server is doing | `./data/instances/<n>/RuntimeLog_*.log` is that server's own log. |
 
 ## Security notes
 

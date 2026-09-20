@@ -64,7 +64,7 @@ jobs:
           mkdir -p data
           docker run -d --name aio --network host \
             -e PUID=1234 -e PGID=1234 -e TZ=Africa/Cairo \
-            -e MASTER_LOG_CREATE=true \
+            -e MASTER_FILE_LOG_LEVEL=3 \
             -e MASTER_ALL_STATS_UNLOCKED=true \
             -e SERVER_RCON_PASSWORD=testpass123 \
             -e SERVER_MAX_PLAYERS=24 \
@@ -274,6 +274,16 @@ jobs:
           echo "--------- master config got MASTER_ALL_STATS_UNLOCKED?"
           grep -E '^(all_stats_unlocked|log_create|emulator_ip)' data/master/config.ini
           grep -q '^all_stats_unlocked = true' data/master/config.ini && echo "PASS" || { echo "FAIL"; fail=1; }
+
+          echo "--------- MASTER_EMULATOR_IP was not set: was a real address detected (not 0.0.0.0)?"
+          if grep -qE '^emulator_ip = (0\.0\.0\.0|127\.0\.0\.1)' data/master/config.ini; then
+            echo "FAIL: emulator_ip is 0.0.0.0 or 127.0.0.1"; fail=1
+          else
+            echo "PASS"
+          fi
+
+          echo "--------- master log file shown in docker logs?"
+          docker logs aio 2>&1 | grep -c "\[Server\]" || true
 
           echo "--------- servers registered with the master (from its log file)"
           count=$(grep -rIh "Server was added to database" data/master 2>/dev/null | wc -l)

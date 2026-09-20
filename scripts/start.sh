@@ -103,6 +103,11 @@ trap shutdown TERM INT
 if [ "$(norm_bool "${MASTER_ENABLED:-true}")" = true ]; then
     log "starting the master server"
     supervise "the master server" run_master
+    # The master's own console output is buffered and arrives late, but its log
+    # file is complete. Show that file in "docker logs" (set MASTER_LOG_TO_CONSOLE=false to stop).
+    if [ "$(norm_bool "${MASTER_LOG_CREATE:-true}")" = true ] && [ "$(norm_bool "${MASTER_LOG_TO_CONSOLE:-true}")" = true ]; then
+        tail -n 0 -F "${MASTERDIR}/logfile.log" 2> /dev/null &
+    fi
     sleep 3    # the original launcher also gives the master a head start
 else
     log "MASTER_ENABLED is false: not starting a master. Servers will look for one at ${MASTER_HOST:-127.0.0.1}"

@@ -8,7 +8,7 @@
 # config files to edit.
 #
 # HOW TO USE
-#   1. Change the lines marked  <-- CHANGE ME.
+#   1. Change the line marked  <-- CHANGE ME (the RCON password).
 #   2. Comment out (put a # in front of) any server you do not want.
 #   3. docker compose up -d       then     docker compose logs -f
 #
@@ -35,19 +35,21 @@ services:
 
       # ---- master server: accounts and the server list ----------------------
       # Any setting of the master's config.ini works as MASTER_<NAME>, upper case.
-      MASTER_EMULATOR_IP: "192.168.1.10"      # <-- CHANGE ME: this machine's LAN IP
+      # MASTER_EMULATOR_IP: "192.168.1.10"    # this machine's LAN IP. Found automatically if you leave it out.
+                                              # Never use 0.0.0.0: clients then cannot log in.
       MASTER_ALL_STATS_UNLOCKED: "true"       # every weapon and gadget unlocked for new players
       MASTER_ALL_ARE_VETERAN: "true"          # everyone gets veteran rank items
       MASTER_PREMIUM_FOR_ALL: "true"          # everyone gets the premium edition items
       MASTER_VIETNAM_FOR_ALL: "true"          # everyone may join Vietnam servers
       MASTER_SPECACT_FOR_ALL: "false"         # everyone gets the SPECACT kits
-      # MASTER_LOG_CREATE: "true"             # also write a log file to ./data/master
+      # MASTER_FILE_LOG_LEVEL: "3"            # master log detail, 1 (default) to 3. Use 3 to debug.
+      # MASTER_LOG_TO_CONSOLE: "false"        # do not show the master log in "docker logs"
       # MASTER_ENABLED: "false"               # do not run a master here (use another one)
       # MASTER_HOST: "127.0.0.1"              # where the servers look for the master
 
       # ---- defaults for EVERY game server -------------------------------------
       # Any SERVER_<NAME> here can be overridden for one server as SERVER_<n>_<NAME>.
-      SERVER_RCON_PASSWORD: "change-me"       # <-- CHANGE ME: remote admin password
+      SERVER_RCON_PASSWORD: "ChangeMe123"     # <-- CHANGE ME: remote admin password. LETTERS AND DIGITS ONLY (no - or _ or spaces)
       # SERVER_RCON_BIND: "0.0.0.0"           # let other PCs use RCON (default: this machine only)
       SERVER_REGION: "OC"                     # region code shown to clients
       SERVER_RANKED: "true"                   # false = unranked. Needed for game passwords.
@@ -107,7 +109,7 @@ services:
       # SERVER_1_MAPLIST: "mp_002, mp_004"     # your own map list (default: all maps of that mode)
       # SERVER_1_PORT: "19567"                 # game port (default shown)
       # SERVER_1_RCON_PORT: "48888"            # remote admin port (default shown)
-      # SERVER_1_RCON_PASSWORD: "other-pw"     # own RCON password for this server
+      # SERVER_1_RCON_PASSWORD: "OtherPw123"   # own RCON password for this server (letters and digits only)
       # SERVER_1_BANNER_URL: "http://.../banner.png"   # server banner image (512x64 PNG)
 
       # ---- anything else -----------------------------------------------------------------

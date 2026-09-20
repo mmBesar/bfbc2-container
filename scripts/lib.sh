@@ -118,11 +118,25 @@ gen_rcon_default() {
     fi
     local file="${CONFIG_DIR}/rcon-password"
     if [ ! -s "$file" ]; then
-        LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 > "$file" || true
+        LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12 > "$file" || true
         chmod 600 "$file"
         log "SERVER_RCON_PASSWORD is not set. Generated a random one and saved it in ${file}"
     fi
     RCON_DEFAULT_PW=$(cat "$file")
+}
+
+# The IP address other machines use to reach this one. Used when
+# MASTER_EMULATOR_IP is not set. (Needs host networking, which is required anyway.)
+detect_lan_ip() {
+    local ip=""
+    if command -v ip > /dev/null 2>&1; then
+        # The address this machine would use to reach the internet. No traffic is sent.
+        ip=$(ip -4 route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+    fi
+    if [ -z "$ip" ]; then
+        ip=$(hostname -I 2> /dev/null | awk '{ print $1 }')
+    fi
+    printf '%s' "$ip"
 }
 
 # The client-side "hook" settings file next to the game executable.
@@ -162,14 +176,26 @@ gen_master_config() {
     cp "${PACK_DIR}/MasterServerEmu/config.ini" "${MASTERDIR}/config.ini"
     chmod 644 "${MASTERDIR}/config.ini"
 
-    # Clients on other machines need to reach the master, so listen everywhere
-    # unless told otherwise.
-    : "${MASTER_EMULATOR_IP:=0.0.0.0}"
+    # The master tells every client where to connect next, using this address.
+    # 0.0.0.0 does NOT work for real clients (login fails), so when it is not
+    # set we use this machine's own LAN address.
+    if [ -z "${MASTER_EMULATOR_IP:-}" ]; then
+        MASTER_EMULATOR_IP=$(detect_lan_ip)
+        if [ -n "$MASTER_EMULATOR_IP" ]; then
+            log "MASTER_EMULATOR_IP is not set. Using this machine's address: ${MASTER_EMULATOR_IP}"
+        else
+            MASTER_EMULATOR_IP=127.0.0.1
+            warn "MASTER_EMULATOR_IP is not set and this machine's address could not be found. Using 127.0.0.1, which only works on this machine. Set MASTER_EMULATOR_IP."
+        fi
+    fi
+    # A log file is on by default (level 1: connections). It is also shown in "docker logs".
+    : "${MASTER_LOG_CREATE:=true}"
+    : "${MASTER_FILE_LOG_LEVEL:=1}"
 
     local v key
     for v in $(compgen -A variable MASTER_ | sort); do
         case "$v" in
-            MASTER_ENABLED|MASTER_HOST) continue ;;   # our own settings, not config.ini keys
+            MASTER_ENABLED|MASTER_HOST|MASTER_LOG_TO_CONSOLE) continue ;;   # our own settings, not config.ini keys
         esac
         key=${v#MASTER_}; key=${key,,}
         if ! set_ini_value "${MASTERDIR}/config.ini" "$key" "${!v}"; then
@@ -216,6 +242,15 @@ gen_server() {
         return 1
     fi
 
+    # The game stops with an error (and would restart in a loop) if the RCON
+    # password has anything but letters and digits, so refuse it here.
+    local rcon_pw
+    rcon_pw=$(setting "$n" RCON_PASSWORD "$RCON_DEFAULT_PW")
+    if [[ ! "$rcon_pw" =~ ^[A-Za-z0-9]+$ ]]; then
+        warn "server ${n}: the RCON password may only contain letters and digits (no dashes, spaces or symbols). Skipping this server. Fix SERVER_${n}_RCON_PASSWORD or SERVER_RCON_PASSWORD."
+        return 1
+    fi
+
     local inst="${INSTANCE_ROOT}/${n}"
     mkdir -p "${inst}/AdminScripts"
 
@@ -245,7 +280,7 @@ gen_server() {
     opt_set Port               "$port"
     # RCON only opens with the "ip:port" form. Localhost by default.
     opt_set RemoteAdminPort    "$(setting "$n" RCON_BIND 127.0.0.1):${rcon_port}"
-    opt_set RemoteAdminPassword "$(setting "$n" RCON_PASSWORD "$RCON_DEFAULT_PW")"
+    opt_set RemoteAdminPassword "$rcon_pw"
     opt_set PunkBuster         "$(norm_bool "$(setting "$n" PUNKBUSTER false)")"
     opt_set Ranked             "$(norm_bool "$(setting "$n" RANKED true)")"
     opt_set NumGameClientSlots "$(setting "$n" MAX_PLAYERS 16)"
@@ -283,6 +318,9 @@ gen_server() {
     banner=$(setting "$n" BANNER_URL "")
     [ -z "$desc" ]   || var_set serverDescription "${desc//$'\n'/|}"   # new lines become | in this game
     if [ -n "$pass" ]; then
+        if [[ ! "$pass" =~ ^[A-Za-z0-9]{1,16}$ ]]; then
+            warn "server ${n}: GAME_PASSWORD should be 1 to 16 letters or digits. The game may refuse it."
+        fi
         var_set gamePassword "$pass"
         # Found in testing: the game does not apply a password on a ranked server.
         if [ "${OPT_VAL[Ranked],,}" = true ]; then

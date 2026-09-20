@@ -109,6 +109,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   gosu            - run the servers as your PUID/PGID user
 #   tini            - proper PID 1: forwards stop signals, cleans up processes
 #   procps          - pkill, used when shutting down
+#   iproute2        - finds this machine's LAN address (MASTER_EMULATOR_IP)
 RUN dpkg --add-architecture i386 \
  && sed -i 's/^Components: main$/& contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
@@ -127,6 +128,7 @@ RUN dpkg --add-architecture i386 \
         gosu \
         tini \
         procps \
+        iproute2 \
  && rm -rf /var/lib/apt/lists/*
 
 # A normal (non-root) user to run everything as, plus the /data folder that
