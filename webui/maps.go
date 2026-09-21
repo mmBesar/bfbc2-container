@@ -130,17 +130,42 @@ func NewMapImages(dir, baseURL string, download bool) *MapImages {
 	}
 }
 
-// Path returns the file to send for a level, downloading it first if needed.
+// Available says whether there is anything to show: downloads are on, or
+// there are pictures in the folder already (your own, or downloaded before).
+func (m *MapImages) Available() bool {
+	if m.download {
+		return true
+	}
+	entries, err := os.ReadDir(m.dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".jpg") {
+			return true
+		}
+	}
+	return false
+}
+
+// Path returns the file to send for a level. A picture you put in the folder
+// yourself, named after the level (mp_002.jpg), always wins. Otherwise the
+// downloaded one is used, and fetched first if downloads are on.
 func (m *MapImages) Path(level string) (string, error) {
-	info, ok := levels[normalizeLevel(level)]
+	id := normalizeLevel(level)
+	info, ok := levels[id]
 	if !ok {
 		return "", errors.New("unknown map")
 	}
+	own := filepath.Join(m.dir, id+".jpg")
 	file := filepath.Join(m.dir, strings.ReplaceAll(info.Image, "/", "_"))
 
 	m.mu.Lock()
 	defer m.mu.Unlock() // one download at a time keeps things simple
 
+	if _, err := os.Stat(own); err == nil {
+		return own, nil
+	}
 	if _, err := os.Stat(file); err == nil {
 		return file, nil
 	}

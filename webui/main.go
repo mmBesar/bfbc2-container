@@ -45,22 +45,26 @@ func main() {
 	configDir := getenv("CONFIG_DIR", filepath.Join(dataDir, "config"))
 	masterDir := getenv("MASTERDIR", filepath.Join(dataDir, "master"))
 
+	control := os.Getenv("CONTROL_DIR")
 	servers := DiscoverServers(os.Environ(), instanceRoot, log.Printf)
 	byID := map[int]*Server{}
 	for _, s := range servers {
+		s.Control = control
 		byID[s.ID] = s
 		s.StartPolling(5 * time.Second)
 	}
 
 	static := fs.FS(webFiles)
 	user, pass := loadCredentials(configDir)
-	downloads := strings.ToLower(getenv("WEB_MAP_IMAGES", "true"))
+	// Map pictures are OFF by default: the container then depends on nothing outside.
+	downloads := strings.ToLower(getenv("WEB_MAP_IMAGES", "false"))
 	app := &App{
 		servers: servers, byID: byID, user: user, pass: pass,
 		masterConf: filepath.Join(masterDir, "config.ini"),
 		started:    time.Now(), static: static,
 		maps: NewMapImages(filepath.Join(dataDir, "cache", "maps"), os.Getenv("WEB_MAP_IMAGE_URL"),
-			downloads != "false" && downloads != "0" && downloads != "no" && downloads != "off"),
+			downloads == "true" || downloads == "1" || downloads == "yes" || downloads == "on"),
+		control: control,
 	}
 
 	addr := net.JoinHostPort(getenv("WEB_BIND", "0.0.0.0"), getenv("WEB_PORT", "5010"))

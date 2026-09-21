@@ -24,6 +24,7 @@ type Server struct {
 	Type     string
 	GamePort int
 	Rcon     *Client
+	Control  string // folder where start.sh keeps the on/off state (see start.sh)
 
 	mu      sync.RWMutex
 	info    *Info
@@ -37,6 +38,7 @@ type Server struct {
 type ServerView struct {
 	ID       int                 `json:"id"`
 	Type     string              `json:"type"`
+	State    string              `json:"state"` // running, stopped, or empty if unknown
 	GamePort int                 `json:"gamePort"`
 	Online   bool                `json:"online"`
 	Error    string              `json:"error,omitempty"`
@@ -49,9 +51,13 @@ func (s *Server) View() ServerView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v := ServerView{
-		ID: s.ID, Type: s.Type, GamePort: s.GamePort,
+		ID: s.ID, Type: s.Type, State: s.State(), GamePort: s.GamePort,
 		Online: s.online, Error: s.lastErr, Info: s.info,
 		Players: s.players,
+	}
+	if v.State == "stopped" {
+		// Stopped on purpose: do not show what the last poll saw before it stopped.
+		v.Online, v.Info, v.Players, v.Error = false, nil, nil, ""
 	}
 	if v.Players == nil {
 		v.Players = []map[string]string{}
@@ -62,8 +68,28 @@ func (s *Server) View() ServerView {
 	return v
 }
 
+// State says whether the server is meant to be running: "running", "stopped",
+// or "" if we do not know (no control folder).
+func (s *Server) State() string {
+	if s.Control == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(s.Control, "state-"+strconv.Itoa(s.ID)))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // Poll asks the server for its info and player list and stores the result.
 func (s *Server) Poll() {
+	if s.State() == "stopped" {
+		// Stopped on purpose: nothing to ask, and it is not an error.
+		s.mu.Lock()
+		s.info, s.players, s.updated, s.online, s.lastErr = nil, nil, time.Now(), false, ""
+		s.mu.Unlock()
+		return
+	}
 	words, err := s.Rcon.Do("serverInfo")
 	if err != nil {
 		s.fail(err)

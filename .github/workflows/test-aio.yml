@@ -278,15 +278,37 @@ jobs:
           " && echo PASS || { echo FAIL; fail=1; }
           echo "--------- a command sent through the web interface reaches server 2"
           curl -s -u admin:webpass123 -H 'Content-Type: application/json' -d '{"command":"vars.serverName"}' $U/api/servers/2/console | grep -q "Test SQDM" && echo PASS || { echo FAIL; fail=1; }
-          echo "--------- a map picture is downloaded and served (needs internet)"
-          [ "$(curl -s -o /tmp/map.jpg -w '%{http_code} %{content_type}' -u admin:webpass123 $U/maps/mp_002.jpg)" = "200 image/jpeg" ] \
-            && [ "$(head -c 3 /tmp/map.jpg | od -An -tx1 | tr -d ' \n')" = "ffd8ff" ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- map pictures are off by default: nothing is downloaded"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -u admin:webpass123 $U/maps/mp_002.jpg)" = 404 ] \
+            && curl -s -u admin:webpass123 $U/api/status | grep -q '"mapImages":false' && echo PASS || { echo FAIL; fail=1; }
           echo "--------- status checks must not make the master log connection errors"
           for i in 1 2 3; do curl -s -o /dev/null -u admin:webpass123 $U/api/status; done
           sleep 2
           if grep -q "handle_handshake" data/master/logfile.log; then echo "FAIL: the master logged handshake errors"; fail=1; else echo PASS; fi
           echo "--------- a cross-site style request (form data) is refused"
           [ "$(curl -s -o /dev/null -w '%{http_code}' -u admin:webpass123 -d 'x=1' $U/api/servers/2/console)" = 415 ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- stop server 3 from the web interface: its RCON port closes and its state says stopped"
+          curl -s -u admin:webpass123 -H 'Content-Type: application/json' -d '{"action":"stop"}' $U/api/servers/3/power | grep -q '"ok":true' || { echo "FAIL: stop was refused"; fail=1; }
+          closed=no
+          for i in $(seq 1 20); do
+            if ! (echo > /dev/tcp/127.0.0.1/48890) 2>/dev/null; then closed=yes; break; fi
+            sleep 1
+          done
+          [ "${closed}" = yes ] && echo "PASS: the port closed" || { echo "FAIL: the server did not stop"; fail=1; }
+          stopped=no
+          for i in $(seq 1 10); do
+            if curl -s -u admin:webpass123 $U/api/servers | grep -q '"state":"stopped"'; then stopped=yes; break; fi
+            sleep 1
+          done
+          [ "${stopped}" = yes ] && echo "PASS: state is stopped" || { echo "FAIL: state never became stopped"; fail=1; }
+          echo "--------- start it again: its RCON port opens"
+          curl -s -u admin:webpass123 -H 'Content-Type: application/json' -d '{"action":"start"}' $U/api/servers/3/power | grep -q '"ok":true' || { echo "FAIL: start was refused"; fail=1; }
+          opened=no
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/48890) 2>/dev/null; then opened=yes; break; fi
+            sleep 2
+          done
+          [ "${opened}" = yes ] && echo "PASS: it is running again" || { echo "FAIL: the server did not start again"; fail=1; }
           exit "${fail}"
 
       - name: Check users, time zone, files and master registration

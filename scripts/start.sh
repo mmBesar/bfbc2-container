@@ -43,6 +43,15 @@ fi
 STOPFLAG=/tmp/aio-stopping
 rm -f "$STOPFLAG"
 
+# Where the web interface and this script talk to each other about the game
+# servers: what each one SHOULD be doing (want-<n>: run or stop), what it is
+# doing (state-<n>), and its process number (pid-<n>). It is rebuilt at every
+# start, so the SERVER_<n>_AUTOSTART settings always decide the starting state.
+CONTROL_DIR="${CONTROL_DIR:-/tmp/bfbc2-control}"
+export CONTROL_DIR
+rm -rf "$CONTROL_DIR"
+mkdir -p "$CONTROL_DIR"
+
 # Run a command; if it stops, start it again after 5 seconds.
 supervise() {
     local name=$1; shift
@@ -52,6 +61,44 @@ supervise() {
             [ -e "$STOPFLAG" ] && break
             log "${name} stopped. Starting it again in 5 seconds."
             sleep 5
+        done
+    ) &
+}
+
+# Keeps one game server running (or stopped) as the "want" file says.
+#   - want = run:  start it, and start it again 5 seconds after it stops
+#   - want = stop: stop it and leave it stopped
+# The web interface changes the want file.
+supervise_server() {
+    local n=$1
+    (
+        local want pid
+        while [ ! -e "$STOPFLAG" ]; do
+            want=$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null || echo run)
+            if [ "$want" = stop ]; then
+                echo stopped > "$CONTROL_DIR/state-${n}"
+                sleep 2
+                continue
+            fi
+            echo running > "$CONTROL_DIR/state-${n}"
+            run_server "$n" &
+            pid=$!
+            echo "$pid" > "$CONTROL_DIR/pid-${n}"
+            while kill -0 "$pid" 2> /dev/null; do
+                [ -e "$STOPFLAG" ] && break
+                if [ "$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null)" = stop ]; then
+                    kill -TERM "$pid" 2> /dev/null
+                    break
+                fi
+                sleep 1
+            done
+            wait "$pid" 2> /dev/null
+            rm -f "$CONTROL_DIR/pid-${n}"
+            [ -e "$STOPFLAG" ] && break
+            if [ "$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null)" != stop ]; then
+                log "game server ${n} stopped. Starting it again in 5 seconds."
+                sleep 5
+            fi
         done
     ) &
 }
@@ -76,9 +123,11 @@ run_server() {
     mp2=$(setting "$n" MAPPACK2 1)
     extra=$(setting "$n" EXTRA_ARGS "")
     cd "$PACK_DIR"
+    # "exec" makes this process BE the game server (not its parent), so the
+    # process number we record is the right one to stop.
     # $extra is left unquoted on purpose: it may hold several arguments.
     # shellcheck disable=SC2086
-    wine Frost.Game.Main_Win32_Final.exe \
+    exec wine Frost.Game.Main_Win32_Final.exe \
         -serverInstancePath "instances/${n}/" \
         -mapPack2Enabled "$mp2" \
         -timeStampLogNames \
@@ -143,9 +192,16 @@ if [ "${#SERVERS[@]}" -gt 0 ]; then
     done
 
     for n in "${SERVERS[@]}"; do
-        log "starting game server ${n}"
-        supervise "game server ${n}" run_server "$n"
-        sleep 2    # the original launcher also waits between servers
+        if [ "$(norm_bool "$(setting "$n" AUTOSTART true)")" = true ]; then
+            echo run > "$CONTROL_DIR/want-${n}"
+            log "starting game server ${n}"
+            supervise_server "$n"
+            sleep 2    # the original launcher also waits between servers
+        else
+            echo stop > "$CONTROL_DIR/want-${n}"
+            log "game server ${n} is set not to start by itself (SERVER_${n}_AUTOSTART). Start it from the web interface."
+            supervise_server "$n"
+        fi
     done
 fi
 

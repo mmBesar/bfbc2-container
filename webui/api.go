@@ -11,12 +11,15 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const version = "0.2.1"
+const version = "0.3.0"
 
 type App struct {
 	servers    []*Server
@@ -24,6 +27,7 @@ type App struct {
 	user, pass string
 	masterConf string // path of the master's config.ini (to find its ports)
 	maps       *MapImages
+	control    string // folder for starting and stopping servers (see start.sh)
 	started    time.Time
 	static     fs.FS
 }
@@ -34,6 +38,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/status", a.handleStatus)
 	mux.HandleFunc("GET /api/servers", a.handleServers)
 	mux.HandleFunc("GET /api/servers/{id}/settings", a.handleSettings)
+	mux.HandleFunc("POST /api/servers/{id}/power", a.handlePower)
 	mux.HandleFunc("POST /api/servers/{id}/kick", a.handleKick)
 	mux.HandleFunc("POST /api/servers/{id}/ban", a.handleBan)
 	mux.HandleFunc("POST /api/servers/{id}/move", a.handleMove)
@@ -155,10 +160,11 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ports = append(ports, port{p.name, n, open})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version": version,
-		"uptime":  int(time.Since(a.started).Seconds()),
-		"servers": len(a.servers),
-		"master":  map[string]any{"ports": ports, "reachable": len(ports) > 0 && all},
+		"version":   version,
+		"uptime":    int(time.Since(a.started).Seconds()),
+		"servers":   len(a.servers),
+		"mapImages": a.maps != nil && a.maps.Available(),
+		"master":    map[string]any{"ports": ports, "reachable": len(ports) > 0 && all},
 	})
 }
 
@@ -231,6 +237,63 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"defs": settingDefs, "values": values, "currentLevel": current, "maps": maps,
 	})
+}
+
+// handlePower starts, stops or restarts a game server. It does not touch the
+// game itself: it leaves a note for start.sh (the "want" file), which then does it.
+// Starting and stopping last until the container restarts. After that, the
+// SERVER_<n>_AUTOSTART setting decides again.
+func (a *App) handlePower(w http.ResponseWriter, r *http.Request) {
+	s := a.server(w, r)
+	if s == nil {
+		return
+	}
+	if a.control == "" {
+		writeErr(w, http.StatusServiceUnavailable, "starting and stopping is not available here")
+		return
+	}
+	var in struct{ Action string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	switch in.Action {
+	case "start":
+		if err := writeWant(a.control, s.ID, "run"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "stop":
+		if err := writeWant(a.control, s.ID, "stop"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "restart":
+		if err := writeWant(a.control, s.ID, "run"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Stop the running process. start.sh notices and starts it again after a few seconds.
+		if b, err := os.ReadFile(filepath.Join(a.control, "pid-"+strconv.Itoa(s.ID))); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
+				syscall.Kill(pid, syscall.SIGTERM)
+			}
+		}
+	default:
+		writeErr(w, http.StatusBadRequest, "action must be start, stop or restart")
+		return
+	}
+	go func() { time.Sleep(3 * time.Second); s.Poll() }()
+	okJSON(w, nil)
+}
+
+// writeWant writes what a server should be doing, so that it is never half-written.
+func writeWant(dir string, id int, want string) error {
+	file := filepath.Join(dir, "want-"+strconv.Itoa(id))
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, []byte(want+"\n"), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, file)
 }
 
 // ---- actions ---------------------------------------------------------------------------

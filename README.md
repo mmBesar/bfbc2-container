@@ -108,11 +108,15 @@ or push it to a registry of your own. Please do not publish it publicly.
 Open `http://<this machine's IP>:5010` in a browser and log in (user `admin`,
 and the password you set with `WEB_PASSWORD`).
 
-- **Overview:** one card per server with its map (with a picture), player
-  count and state, and whether the master server is running.
+- **Overview:** one card per server with its map (a coloured tile, or a picture
+  if you enable pictures), player count and state, and whether the master server
+  is running.
 - **Players:** the live player list with **Kick**, **Ban** (permanent, until the
   round ends, or for a number of seconds), and moving a player to the other
   team or to a squad.
+- **Start, stop, restart:** switch a single game server on or off (to save CPU
+  and memory) or restart it. This lasts until the container restarts; after
+  that `SERVER_<n>_AUTOSTART` decides again.
 - **Round & map:** next round, restart, end the round with a winner, and the
   server's map list.
 - **Settings:** switch hardcore, friendly fire, killcam and the others on or
@@ -180,7 +184,7 @@ Useful master keys: `LOG_CREATE`, `CONSOLE_LOG_LEVEL`, `ALL_STATS_UNLOCKED`,
 | `WEB_USER` | `admin` | Login name |
 | `WEB_PASSWORD` | random | Login password. If not set, a random one is made once and saved in `/data/config/web-password`. |
 | `WEB_BIND` | `0.0.0.0` | Address the web interface listens on |
-| `WEB_MAP_IMAGES` | `true` | Show map pictures. They are downloaded once from the PRoCon project into `/data/cache/maps` and are not part of the image. Set `false` to never download. |
+| `WEB_MAP_IMAGES` | `false` | Also show map **pictures**. When `true`, each is downloaded once from the PRoCon project into `/data/cache/maps` (not part of the image). Without it, maps get a coloured tile with their name and the container needs no outside source. |
 
 ### Game servers
 
@@ -210,6 +214,7 @@ The keys marked "per server only" have no global form.
 | `DESCRIPTION` | none | Server description (line breaks are allowed) |
 | `GAME_PASSWORD` | none | Password to join. Only works on unranked servers (`RANKED=false`); the game ignores it on ranked ones. |
 | `BANNER_URL` | none | Server banner image address |
+| `AUTOSTART` | `true` | `false` = the server is defined but stays stopped until you start it in the web interface |
 | `STARTUP` | none | Extra raw lines for the server's startup script |
 | `EXTRA_ARGS` | none | Extra command line arguments for the server program |
 
@@ -230,6 +235,46 @@ server in the container.
 `HOOK_RANKING_MIN_PLAYERS` (1), `HOOK_DESERTING_ALLOWED` (0),
 `HOOK_INSTANT_SPAWN` (0), `HOOK_UNLIMITED_AMMO` (0), `HOOK_HEALTH_MODE` (0).
 
+## Using less CPU and memory
+
+On a small machine the number of running game servers is what matters. From
+measurements of this container:
+
+| Running servers | Memory | CPU when nobody is playing |
+|---|---|---|
+| 3 | about 0.5 GB | roughly 15-20% of one core |
+| 8 | about 1 GB | roughly 45-60% of one core |
+
+There is a fixed part of about 200 MB (Wine and the fake screen) and each
+server adds roughly 100-150 MB and 5-7% of a core, even when empty, because it
+keeps its map loaded and keeps ticking. The master server and the web
+interface need very little.
+
+What helps, from most to least effective:
+
+1. **Run fewer servers.** Comment out the ones you never play.
+2. **Keep rarely used servers stopped.** Set `SERVER_<n>_AUTOSTART: "false"`
+   (or `SERVER_AUTOSTART: "false"` for all) and start a server from the web
+   interface only when you want it. A stopped server uses no CPU or memory
+   and is not in the game's server list.
+3. **Give the container limits** so it can never crowd out other services:
+   `cpus`, `cpu_shares` and `mem_limit` (see the commented lines in
+   `docker-compose.yml`). They cap or de-prioritise the container. They do not
+   make it use less by themselves.
+
+## Map pictures
+
+The web interface never needs pictures: every map gets a coloured tile with its
+name. If you want real pictures, there are two ways:
+
+- Set `WEB_MAP_IMAGES: "true"`. Each picture is downloaded once from the PRoCon
+  project (a fixed version of it) and kept in `./data/cache/maps`.
+- Or put your own JPEG files in `./data/cache/maps`, named after the level, for
+  example `mp_002.jpg`. Your files always win.
+
+The pictures are artwork of the game and are **not** included in this
+repository or the image.
+
 ## The data folder
 
 Mount one folder at `/data`:
@@ -239,7 +284,8 @@ Mount one folder at `/data`:
 | `/data/pack` | The unpacked server pack (safe to delete; it is unpacked again) |
 | `/data/instances/<n>` | One folder per game server: generated settings, ban list, reserved slots |
 | `/data/master` | The master's generated config, its templates, and the account database |
-| `/data/config` | The generated RCON password, if you did not set one |
+| `/data/config` | The generated RCON and web passwords, if you did not set them |
+| `/data/cache/maps` | Map pictures (only if you enable them or add your own) |
 
 Settings files are **regenerated from your environment variables on every
 start**, so change them in Compose, not in the files. Ban lists, reserved
@@ -271,8 +317,8 @@ by default (`WEB_PORT`).
 
 - x86-64 only (Wine, 32-bit game server).
 - Host networking only.
-- The web interface cannot yet start or stop a single server, edit the ban
-  list or the map list, or manage master accounts. These are planned.
+- The web interface cannot yet edit the ban list or the map list, or manage
+  master accounts. These are planned.
 
 ## Tests and releases
 
@@ -298,7 +344,7 @@ This project is only glue. All the hard work was done by others. Thank you!
 | **Triver** and the **BFBC2 MASE** project ([SourceForge](https://sourceforge.net/projects/battlefieldbadcompany2mase/), project page by flyer8472) | The master server emulator (built from its published source) and the server pack with the client hook. This project would not exist without it. Its readme also thanks **Domo**, **Freaky123** and **Aluigi**. |
 | **jkuettner**: [bfbc2-server](https://codeberg.org/jkuettner/bfbc2-server) (Codeberg; the [GitHub copy](https://github.com/jkuettner/bfbc2-server) is archived) | Docker images that showed how to run the master and the game servers in containers, and which Wine pieces are needed. |
 | **The-May**: [bfbc2-webcon](https://github.com/The-May/bfbc2-webcon) | A web dashboard that showed how the remote admin (RCON) protocol behaves. Its map index was the reference for the map names and which picture belongs to which map. |
-| **AdKats / PRoCon**: [Procon-1](https://github.com/AdKats/Procon-1) and **[OpenRCON](https://github.com/OpenRcon/OpenRcon)** | Remote admin tools known to work with this stack, and references for the RCON protocol. The web interface also downloads its map pictures from the PRoCon repository (once, at run time; they are not stored in this repository or the image). The pictures are artwork of the game. |
+| **AdKats / PRoCon**: [Procon-1](https://github.com/AdKats/Procon-1) and **[OpenRCON](https://github.com/OpenRcon/OpenRcon)** | Remote admin tools known to work with this stack, and references for the RCON protocol. If you enable `WEB_MAP_IMAGES`, the web interface downloads map pictures from the PRoCon repository (once, at run time; they are not stored in this repository or the image). The pictures are artwork of the game. |
 | **[Wine](https://www.winehq.org/)**, **[winetricks](https://github.com/Winetricks/winetricks)**, **[Debian](https://www.debian.org/)**, **[Xvfb](https://www.x.org/)** | Run the Windows game server on Linux. |
 | **[tini](https://github.com/krallin/tini)**, **[gosu](https://github.com/tianon/gosu)** | Correct process handling and the PUID/PGID user switch in the container. |
 | **[Trivy](https://github.com/aquasecurity/trivy)**, the **Docker GitHub Actions** | Vulnerability scanning and image builds in CI. |

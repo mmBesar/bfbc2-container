@@ -78,7 +78,7 @@ const LEVEL_NAMES = {
 
 const SQUADS = ["No squad", "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
 
-const state = { servers: [], selected: null, tab: "players" };
+const state = { servers: [], selected: null, tab: "players", mapImages: false };
 
 // ---- tiny helpers -----------------------------------------------------------
 
@@ -134,14 +134,24 @@ function mapLabel(level) {
   return LEVEL_NAMES[id] || id;
 }
 
-// A picture of the map, or nothing if we do not know it or it cannot be loaded.
-function pic(level, cls) {
+// A coloured tile with the map's name. Every map gets its own colour (the same
+// in all modes), so the page looks good with no pictures at all. If map pictures
+// are available they are shown on top of the tile.
+// (The colour is set through .style, not a style attribute: the page's security
+// rules do not allow inline style attributes.)
+function mapVisual(level, cls) {
   const id = levelId(level);
-  if (!(id in LEVEL_NAMES)) return null;
-  return el("img", {
-    class: cls, src: `/maps/${id}.jpg`, alt: "", loading: "lazy",
-    onerror: (e) => e.target.remove(),
-  });
+  const base = id.replace(/_?(gr|cq|sr|sdm|r)$/, "");
+  let hash = 0;
+  for (const c of base) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  const hue = hash % 360;
+  const tile = el("div", { class: "tile " + cls, title: id },
+    cls === "mini" ? null : el("span", { class: "tile-name" }, mapLabel(level)));
+  tile.style.background = `linear-gradient(135deg, hsl(${hue} 42% 32%), hsl(${(hue + 50) % 360} 46% 16%))`;
+  if (state.mapImages && id in LEVEL_NAMES) {
+    tile.append(el("img", { src: `/maps/${id}.jpg`, alt: "", loading: "lazy", onerror: (e) => e.target.remove() }));
+  }
+  return tile;
 }
 
 const serverById = (id) => state.servers.find((s) => s.id === id);
@@ -158,6 +168,7 @@ function renderCards() {
   }
   for (const s of state.servers) {
     const info = s.info;
+    const stopped = s.state === "stopped";
     box.append(el("article", {
       class: "card" + (s.online ? "" : " off"), tabindex: "0", role: "button",
       onclick: () => select(s.id),
@@ -165,13 +176,15 @@ function renderCards() {
     },
       el("div", { class: "card-top" },
         el("strong", {}, info ? info.name : `Server ${s.id}`),
-        el("span", { class: "pill " + (s.online ? "ok" : "bad") }, s.online ? "online" : "offline")),
+        stopped
+          ? el("span", { class: "pill" }, "stopped")
+          : el("span", { class: "pill " + (s.online ? "ok" : "bad") }, s.online ? "online" : "offline")),
       el("div", { class: "muted" }, modeName(s)),
-      s.online && info ? pic(info.map, "thumb") : null,
+      s.online && info ? mapVisual(info.map, "thumb") : null,
       s.online && info
         ? [el("div", {}, mapLabel(info.map)),
            el("div", { class: "big" }, `${info.players}/${info.maxPlayers}`, el("small", {}, " players"))]
-        : el("div", { class: "muted" }, s.error || "waiting for the server..."),
+        : el("div", { class: "muted" }, stopped ? "Not running. Open it to start it." : (s.error || "waiting for the server...")),
       el("div", { class: "muted small" }, `game port ${s.gamePort}`)));
   }
 }
@@ -207,24 +220,31 @@ function renderDetail() {
   if (!s) return;
   const info = s.info;
   $("#d-title").textContent = info ? info.name : `Server ${s.id}`;
+  const stopped = s.state === "stopped";
   const pill = $("#d-state");
-  pill.textContent = s.online ? "online" : "offline";
-  pill.className = "pill " + (s.online ? "ok" : "bad");
-  $("#d-sub").textContent = s.online && info
+  pill.textContent = stopped ? "stopped" : (s.online ? "online" : "offline");
+  pill.className = "pill " + (stopped ? "" : (s.online ? "ok" : "bad"));
+  $("#p-start").hidden = !stopped;
+  $("#p-stop").hidden = stopped;
+  $("#p-restart").hidden = stopped;
+  $("#d-sub").textContent = stopped
+    ? "This server is stopped. It uses no CPU or memory and is not in the server list. It stays stopped until you start it or the container restarts."
+    : s.online && info
     ? `${modeName(s)} | ${mapLabel(info.map)} | round ${info.roundsPlayed} of ${info.roundsTotal} | ` +
       `${info.players}/${info.maxPlayers} players | ${info.ranked ? "ranked" : "unranked"}` +
       `${info.hasPassword ? " | password protected" : ""} | game port ${s.gamePort}`
     : (s.error || "waiting for the server...");
   $("#round-now").textContent = info ? `Now playing: ${mapLabel(info.map)}` : "";
   const hero = $("#d-image");
-  const src = info && s.online ? `/maps/${levelId(info.map)}.jpg` : "";
-  if (!src || !(levelId(info.map) in LEVEL_NAMES)) {
+  const level = info && s.online ? levelId(info.map) : "";
+  if (!(level in LEVEL_NAMES)) {
     hero.hidden = true;
-    hero.removeAttribute("src");
-    hero.dataset.src = "";
-  } else if (hero.dataset.src !== src) {
-    hero.dataset.src = src;
-    hero.src = src;   // it is shown when it has loaded (see the listeners at the bottom)
+    hero.dataset.level = "";
+    hero.replaceChildren();
+  } else if (hero.dataset.level !== level) {
+    hero.dataset.level = level;
+    hero.replaceChildren(mapVisual(level, "hero"));
+    hero.hidden = false;
   }
   renderPlayers(s);
 }
@@ -353,7 +373,7 @@ function buildMapList(data) {
   for (const level of data.maps) {
     const now = level.toLowerCase() === current;
     list.append(el("li", { class: now ? "current" : "", title: level },
-      pic(level, "mini"), " ", mapLabel(level), now ? "  <- now" : ""));
+      mapVisual(level, "mini"), " ", mapLabel(level), now ? "  <- now" : ""));
   }
   if (data.maps.length === 0) list.append(el("li", { class: "muted" }, "The server reported no maps."));
 }
@@ -399,6 +419,12 @@ async function loadStatus() {
     pill.className = "pill " + (ok ? "ok" : "bad");
     pill.title = st.master.ports.map((p) => `${p.name} (port ${p.port}): ${p.open ? "open" : "closed"}`).join("\n");
     $("#version").textContent = "v" + st.version;
+    if (state.mapImages !== !!st.mapImages) {
+      state.mapImages = !!st.mapImages;
+      $("#d-image").dataset.level = "";   // draw the tiles again, now with or without pictures
+      renderCards();
+      renderDetail();
+    }
   } catch (_) {
     pill.textContent = "master: unknown";
     pill.className = "pill";
@@ -407,8 +433,13 @@ async function loadStatus() {
 
 // ---- start ---------------------------------------------------------------------------------
 
-$("#d-image").addEventListener("load", () => { $("#d-image").hidden = false; });
-$("#d-image").addEventListener("error", () => { $("#d-image").hidden = true; });
+$("#p-start").addEventListener("click", () => act("power", { action: "start" }, "Starting the server..."));
+$("#p-stop").addEventListener("click", () => {
+  if (confirm("Stop this server? Players on it will be disconnected.")) act("power", { action: "stop" }, "Stopping the server...");
+});
+$("#p-restart").addEventListener("click", () => {
+  if (confirm("Restart this server? Players on it will be disconnected.")) act("power", { action: "restart" }, "Restarting the server...");
+});
 $("#back").addEventListener("click", back);
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => showTab(b.dataset.tab));
 $("#r-next").addEventListener("click", () => { if (confirm("Start the next round?")) act("round", { action: "next" }, "Starting the next round"); });

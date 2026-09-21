@@ -22,6 +22,10 @@ services:
     container_name: bfbc2
     restart: unless-stopped
     network_mode: host                # required: port mapping breaks server registration
+    # ---- optional: keep the container from using too much of a small machine ----
+    # cpus: "1.5"                     # never use more than this many CPU cores
+    # cpu_shares: 512                 # lower priority than other containers when the CPU is busy (default 1024)
+    # mem_limit: 1500m                # memory limit (a server that hits it is stopped, so leave room)
     logging:                          # stops "docker logs" from growing forever
       driver: json-file
       options:
@@ -58,7 +62,9 @@ services:
       # WEB_USER: "admin"                     # login name
       # WEB_PORT: "5010"                      # port
       # WEB_ENABLED: "false"                  # turn the web interface off
-      # WEB_MAP_IMAGES: "false"               # do not download map pictures (they come from the PRoCon project, once)
+      # WEB_MAP_IMAGES: "true"                # also show map PICTURES (downloaded once from the PRoCon project). Off by default:
+                                              # the map tiles work without any outside source. Or put your own pictures,
+                                              # named like mp_002.jpg, into ./data/cache/maps
 
       # ---- defaults for EVERY game server -------------------------------------
       # Any SERVER_<NAME> here can be overridden for one server as SERVER_<n>_<NAME>.
@@ -78,7 +84,12 @@ services:
       # =======================================================================
       # GAME SERVERS  (Each one needs at least TYPE. Comment out what you don't want.)
       # Ports are automatic: game port 19567 + (n-1), RCON port 48888 + (n-1).
-      # Each running server uses roughly 100-200 MB of RAM.
+      # Every running server costs roughly 100-200 MB of RAM and, even when empty,
+      # about 5-7% of one CPU core. On a small machine run only what you need:
+      #   - comment out the servers you never use, or
+      #   - set SERVER_<n>_AUTOSTART: "false" to keep a server defined but stopped,
+      #     and start it from the web interface when you want to play it.
+      # SERVER_AUTOSTART: "false"     # start NO server by itself (per server: SERVER_<n>_AUTOSTART)
       # =======================================================================
 
       # ---- Bad Company 2 ------------------------------------------------------
