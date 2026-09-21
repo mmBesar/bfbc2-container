@@ -1,3 +1,6 @@
+# Local test data: game files, accounts, logs. Never commit these.
+data/
+*.rar
 .git
 .github
 data

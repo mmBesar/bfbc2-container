@@ -11,12 +11,69 @@ const TYPE_NAMES = {
   vietrush: "Vietnam Rush", vietconq: "Vietnam Conquest", vietsqdm: "Vietnam Squad Deathmatch", vietsqrush: "Vietnam Squad Rush",
 };
 
-// Names of the Bad Company 2 maps (Vietnam maps are shown by their id).
-const MAP_NAMES = {
-  mp_001: "Panama Canal", mp_002: "Valparaiso", mp_003: "Laguna Alta", mp_004: "Isla Inocentes",
-  mp_005: "Atacama Desert", mp_006: "Arica Harbor", mp_007: "White Pass", mp_008: "Nelson Bay",
-  mp_009: "Laguna Presa", mp_012: "Port Valdez", mp_sp_002: "Cold War", mp_sp_005: "Heavy Metal",
-  bc1_oasis: "Oasis", bc1_harvest_day: "Harvest Day",
+// Display names of all maps, by level name (from The-May's bfbc2-webcon).
+const LEVEL_NAMES = {
+  "mp_002": "Valparaíso",
+  "mp_004": "Isla Inocentes",
+  "mp_005gr": "Atacama Desert",
+  "mp_006": "Arica Harbor",
+  "mp_007gr": "White Pass",
+  "mp_008": "Nelson Bay",
+  "mp_009gr": "Laguna Presa",
+  "mp_012gr": "Port Valdez",
+  "bc1_oasis_gr": "Oasis",
+  "bc1_harvest_day_gr": "Harvest Day",
+  "mp_sp_002gr": "Cold War",
+  "mp_001": "Panama Canal",
+  "mp_003": "Laguna Alta",
+  "mp_005": "Atacama Desert",
+  "mp_006cq": "Arica Harbor",
+  "mp_007": "White Pass",
+  "mp_008cq": "Nelson Bay",
+  "mp_009cq": "Laguna Presa",
+  "mp_012cq": "Port Valdez",
+  "bc1_oasis_cq": "Oasis",
+  "bc1_harvest_day_cq": "Harvest Day",
+  "mp_sp_005cq": "Heavy Metal",
+  "mp_001sr": "Panama Canal",
+  "mp_002sr": "Valparaíso",
+  "mp_003sr": "Laguna Alta",
+  "mp_005sr": "Atacama Desert",
+  "mp_009sr": "Laguna Presa",
+  "mp_012sr": "Port Valdez",
+  "bc1_oasis_sr": "Oasis",
+  "bc1_harvest_day_sr": "Harvest Day",
+  "mp_sp_002sr": "Cold War",
+  "mp_001sdm": "Panama Canal",
+  "mp_004sdm": "Isla Inocentes",
+  "mp_006sdm": "Arica Harbor",
+  "mp_007sdm": "White Pass",
+  "mp_008sdm": "Nelson Bay",
+  "mp_009sdm": "Laguna Presa",
+  "bc1_oasis_sdm": "Oasis",
+  "bc1_harvest_day_sdm": "Harvest Day",
+  "mp_sp_002sdm": "Cold War",
+  "mp_sp_005sdm": "Heavy Metal",
+  "nam_mp_002cq": "Vantage Point",
+  "nam_mp_003cq": "Hill 137",
+  "nam_mp_005cq": "Cao Son Temple",
+  "nam_mp_006cq": "Phu Bai Valley",
+  "nam_mp_007cq": "Operation Hastings",
+  "nam_mp_002r": "Vantage Point",
+  "nam_mp_003r": "Hill 137",
+  "nam_mp_005r": "Cao Son Temple",
+  "nam_mp_006r": "Phu Bai Valley",
+  "nam_mp_007r": "Operation Hastings",
+  "nam_mp_002sr": "Vantage Point",
+  "nam_mp_003sr": "Hill 137",
+  "nam_mp_005sr": "Cao Son Temple",
+  "nam_mp_006sr": "Phu Bai Valley",
+  "nam_mp_007sr": "Operation Hastings",
+  "nam_mp_002sdm": "Vantage Point",
+  "nam_mp_003sdm": "Hill 137",
+  "nam_mp_005sdm": "Cao Son Temple",
+  "nam_mp_006sdm": "Phu Bai Valley",
+  "nam_mp_007sdm": "Operation Hastings",
 };
 
 const SQUADS = ["No squad", "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
@@ -66,12 +123,25 @@ async function api(method, path, body) {
   return data;
 }
 
+function levelId(level) {
+  return (level || "").toLowerCase().replace(/^levels\//, "");
+}
+
+// "Levels/MP_002" -> "Valparaíso". Unknown maps are shown by their id.
 function mapLabel(level) {
   if (!level) return "-";
-  const id = level.replace(/^levels\//i, "").toLowerCase();
-  const base = id.replace(/_?(gr|cq|sr|sdm)$/, "");
-  const name = MAP_NAMES[base] || MAP_NAMES[id];
-  return name ? `${name} (${id})` : id;
+  const id = levelId(level);
+  return LEVEL_NAMES[id] || id;
+}
+
+// A picture of the map, or nothing if we do not know it or it cannot be loaded.
+function pic(level, cls) {
+  const id = levelId(level);
+  if (!(id in LEVEL_NAMES)) return null;
+  return el("img", {
+    class: cls, src: `/maps/${id}.jpg`, alt: "", loading: "lazy",
+    onerror: (e) => e.target.remove(),
+  });
 }
 
 const serverById = (id) => state.servers.find((s) => s.id === id);
@@ -97,6 +167,7 @@ function renderCards() {
         el("strong", {}, info ? info.name : `Server ${s.id}`),
         el("span", { class: "pill " + (s.online ? "ok" : "bad") }, s.online ? "online" : "offline")),
       el("div", { class: "muted" }, modeName(s)),
+      s.online && info ? pic(info.map, "thumb") : null,
       s.online && info
         ? [el("div", {}, mapLabel(info.map)),
            el("div", { class: "big" }, `${info.players}/${info.maxPlayers}`, el("small", {}, " players"))]
@@ -145,6 +216,16 @@ function renderDetail() {
       `${info.hasPassword ? " | password protected" : ""} | game port ${s.gamePort}`
     : (s.error || "waiting for the server...");
   $("#round-now").textContent = info ? `Now playing: ${mapLabel(info.map)}` : "";
+  const hero = $("#d-image");
+  const src = info && s.online ? `/maps/${levelId(info.map)}.jpg` : "";
+  if (!src || !(levelId(info.map) in LEVEL_NAMES)) {
+    hero.hidden = true;
+    hero.removeAttribute("src");
+    hero.dataset.src = "";
+  } else if (hero.dataset.src !== src) {
+    hero.dataset.src = src;
+    hero.src = src;   // it is shown when it has loaded (see the listeners at the bottom)
+  }
   renderPlayers(s);
 }
 
@@ -270,8 +351,9 @@ function buildMapList(data) {
   list.replaceChildren();
   const current = (data.currentLevel || "").toLowerCase();
   for (const level of data.maps) {
-    list.append(el("li", { class: level.toLowerCase() === current ? "current" : "" },
-      mapLabel(level), level.toLowerCase() === current ? "  <- now" : ""));
+    const now = level.toLowerCase() === current;
+    list.append(el("li", { class: now ? "current" : "", title: level },
+      pic(level, "mini"), " ", mapLabel(level), now ? "  <- now" : ""));
   }
   if (data.maps.length === 0) list.append(el("li", { class: "muted" }, "The server reported no maps."));
 }
@@ -325,6 +407,8 @@ async function loadStatus() {
 
 // ---- start ---------------------------------------------------------------------------------
 
+$("#d-image").addEventListener("load", () => { $("#d-image").hidden = false; });
+$("#d-image").addEventListener("error", () => { $("#d-image").hidden = true; });
 $("#back").addEventListener("click", back);
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => showTab(b.dataset.tab));
 $("#r-next").addEventListener("click", () => { if (confirm("Start the next round?")) act("round", { action: "next" }, "Starting the next round"); });

@@ -108,8 +108,8 @@ or push it to a registry of your own. Please do not publish it publicly.
 Open `http://<this machine's IP>:5010` in a browser and log in (user `admin`,
 and the password you set with `WEB_PASSWORD`).
 
-- **Overview:** one card per server with its map, player count and state, and
-  whether the master server is running.
+- **Overview:** one card per server with its map (with a picture), player
+  count and state, and whether the master server is running.
 - **Players:** the live player list with **Kick**, **Ban** (permanent, until the
   round ends, or for a number of seconds), and moving a player to the other
   team or to a squad.
@@ -180,6 +180,7 @@ Useful master keys: `LOG_CREATE`, `CONSOLE_LOG_LEVEL`, `ALL_STATS_UNLOCKED`,
 | `WEB_USER` | `admin` | Login name |
 | `WEB_PASSWORD` | random | Login password. If not set, a random one is made once and saved in `/data/config/web-password`. |
 | `WEB_BIND` | `0.0.0.0` | Address the web interface listens on |
+| `WEB_MAP_IMAGES` | `true` | Show map pictures. They are downloaded once from the PRoCon project into `/data/cache/maps` and are not part of the image. Set `false` to never download. |
 
 ### Game servers
 
@@ -296,8 +297,8 @@ This project is only glue. All the hard work was done by others. Thank you!
 |---|---|
 | **Triver** and the **BFBC2 MASE** project ([SourceForge](https://sourceforge.net/projects/battlefieldbadcompany2mase/), project page by flyer8472) | The master server emulator (built from its published source) and the server pack with the client hook. This project would not exist without it. Its readme also thanks **Domo**, **Freaky123** and **Aluigi**. |
 | **jkuettner**: [bfbc2-server](https://codeberg.org/jkuettner/bfbc2-server) (Codeberg; the [GitHub copy](https://github.com/jkuettner/bfbc2-server) is archived) | Docker images that showed how to run the master and the game servers in containers, and which Wine pieces are needed. |
-| **The-May**: [bfbc2-webcon](https://github.com/The-May/bfbc2-webcon) | A web dashboard that showed how the remote admin (RCON) protocol behaves. |
-| **AdKats / PRoCon**: [Procon-1](https://github.com/AdKats/Procon-1) and **[OpenRCON](https://github.com/OpenRcon/OpenRcon)** | Remote admin tools known to work with this stack, and references for the RCON protocol. |
+| **The-May**: [bfbc2-webcon](https://github.com/The-May/bfbc2-webcon) | A web dashboard that showed how the remote admin (RCON) protocol behaves. Its map index was the reference for the map names and which picture belongs to which map. |
+| **AdKats / PRoCon**: [Procon-1](https://github.com/AdKats/Procon-1) and **[OpenRCON](https://github.com/OpenRcon/OpenRcon)** | Remote admin tools known to work with this stack, and references for the RCON protocol. The web interface also downloads its map pictures from the PRoCon repository (once, at run time; they are not stored in this repository or the image). The pictures are artwork of the game. |
 | **[Wine](https://www.winehq.org/)**, **[winetricks](https://github.com/Winetricks/winetricks)**, **[Debian](https://www.debian.org/)**, **[Xvfb](https://www.x.org/)** | Run the Windows game server on Linux. |
 | **[tini](https://github.com/krallin/tini)**, **[gosu](https://github.com/tianon/gosu)** | Correct process handling and the PUID/PGID user switch in the container. |
 | **[Trivy](https://github.com/aquasecurity/trivy)**, the **Docker GitHub Actions** | Vulnerability scanning and image builds in CI. |

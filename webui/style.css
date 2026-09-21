@@ -59,3 +59,10 @@ td.actions button { padding: 2px 8px; font-size: 12px; }
 
 #toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--accent); padding: 10px 16px; border-radius: 8px; max-width: 420px; }
 #toast.bad { border-color: var(--bad); }
+
+/* map pictures */
+.thumb { width: 100%; height: 120px; object-fit: cover; border-radius: 6px; margin-bottom: 6px; background: #12151a; }
+.hero { display: block; max-width: 100%; width: 420px; border-radius: 8px; margin: 6px 0 10px; border: 1px solid var(--line); }
+#maplist { padding-left: 24px; }
+#maplist li { margin: 4px 0; }
+.mini { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 6px; }

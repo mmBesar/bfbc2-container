@@ -278,6 +278,13 @@ jobs:
           " && echo PASS || { echo FAIL; fail=1; }
           echo "--------- a command sent through the web interface reaches server 2"
           curl -s -u admin:webpass123 -H 'Content-Type: application/json' -d '{"command":"vars.serverName"}' $U/api/servers/2/console | grep -q "Test SQDM" && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- a map picture is downloaded and served (needs internet)"
+          [ "$(curl -s -o /tmp/map.jpg -w '%{http_code} %{content_type}' -u admin:webpass123 $U/maps/mp_002.jpg)" = "200 image/jpeg" ] \
+            && [ "$(head -c 3 /tmp/map.jpg | od -An -tx1 | tr -d ' \n')" = "ffd8ff" ] && echo PASS || { echo FAIL; fail=1; }
+          echo "--------- status checks must not make the master log connection errors"
+          for i in 1 2 3; do curl -s -o /dev/null -u admin:webpass123 $U/api/status; done
+          sleep 2
+          if grep -q "handle_handshake" data/master/logfile.log; then echo "FAIL: the master logged handshake errors"; fail=1; else echo PASS; fi
           echo "--------- a cross-site style request (form data) is refused"
           [ "$(curl -s -o /dev/null -w '%{http_code}' -u admin:webpass123 -d 'x=1' $U/api/servers/2/console)" = 415 ] && echo PASS || { echo FAIL; fail=1; }
           exit "${fail}"

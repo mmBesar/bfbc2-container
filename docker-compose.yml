@@ -58,6 +58,7 @@ services:
       # WEB_USER: "admin"                     # login name
       # WEB_PORT: "5010"                      # port
       # WEB_ENABLED: "false"                  # turn the web interface off
+      # WEB_MAP_IMAGES: "false"               # do not download map pictures (they come from the PRoCon project, once)
 
       # ---- defaults for EVERY game server -------------------------------------
       # Any SERVER_<NAME> here can be overridden for one server as SERVER_<n>_<NAME>.

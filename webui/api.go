@@ -10,20 +10,20 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 type App struct {
 	servers    []*Server
 	byID       map[int]*Server
 	user, pass string
 	masterConf string // path of the master's config.ini (to find its ports)
+	maps       *MapImages
 	started    time.Time
 	static     fs.FS
 }
@@ -40,6 +40,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/servers/{id}/round", a.handleRound)
 	mux.HandleFunc("POST /api/servers/{id}/setting", a.handleSetting)
 	mux.HandleFunc("POST /api/servers/{id}/console", a.handleConsole)
+	mux.HandleFunc("GET /maps/{file}", a.handleMapImage)
 	mux.Handle("/", http.FileServer(http.FS(a.static)))
 	return a.secure(mux)
 }
@@ -112,6 +113,22 @@ func okJSON(w http.ResponseWriter, out []string) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "output": out})
 }
 
+// handleMapImage sends the picture of a map, like /maps/mp_002.jpg
+func (a *App) handleMapImage(w http.ResponseWriter, r *http.Request) {
+	if a.maps == nil {
+		http.NotFound(w, r)
+		return
+	}
+	file, err := a.maps.Path(strings.TrimSuffix(r.PathValue("file"), ".jpg"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, file)
+}
+
 // ---- read-only endpoints ----------------------------------------------------------
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -133,11 +150,7 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if !found || n == 0 {
 			continue
 		}
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", v), 300*time.Millisecond)
-		open := err == nil
-		if open {
-			conn.Close()
-		}
+		open := portListening(n) // reads the socket tables: no connection, so nothing in the master's log
 		all = all && open
 		ports = append(ports, port{p.name, n, open})
 	}

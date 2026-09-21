@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -53,10 +54,13 @@ func main() {
 
 	static := fs.FS(webFiles)
 	user, pass := loadCredentials(configDir)
+	downloads := strings.ToLower(getenv("WEB_MAP_IMAGES", "true"))
 	app := &App{
 		servers: servers, byID: byID, user: user, pass: pass,
 		masterConf: filepath.Join(masterDir, "config.ini"),
 		started:    time.Now(), static: static,
+		maps: NewMapImages(filepath.Join(dataDir, "cache", "maps"), os.Getenv("WEB_MAP_IMAGE_URL"),
+			downloads != "false" && downloads != "0" && downloads != "no" && downloads != "off"),
 	}
 
 	addr := net.JoinHostPort(getenv("WEB_BIND", "0.0.0.0"), getenv("WEB_PORT", "5010"))

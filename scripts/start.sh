@@ -59,7 +59,13 @@ supervise() {
 run_master() {
     cd "$MASTERDIR"
     # stdin from /dev/null: on an error the master otherwise waits for ENTER.
-    /opt/mase/mase_bc2 < /dev/null
+    if [ "$MASTER_TAIL" = 1 ]; then
+        # Its log file is shown in "docker logs" instead (see below), so its own
+        # console output is dropped. Otherwise every line would appear twice.
+        /opt/mase/mase_bc2 < /dev/null > /dev/null 2>&1
+    else
+        /opt/mase/mase_bc2 < /dev/null
+    fi
 }
 
 run_server() {
@@ -107,11 +113,19 @@ trap shutdown TERM INT
 
 if [ "$(norm_bool "${MASTER_ENABLED:-true}")" = true ]; then
     log "starting the master server"
-    supervise "the master server" run_master
     # The master's own console output is buffered and arrives late, but its log
-    # file is complete. Show that file in "docker logs" (set MASTER_LOG_TO_CONSOLE=false to stop).
-    if [ "$(norm_bool "${MASTER_LOG_CREATE:-true}")" = true ] && [ "$(norm_bool "${MASTER_LOG_TO_CONSOLE:-true}")" = true ]; then
-        tail -n 0 -F "${MASTERDIR}/logfile.log" 2> /dev/null &
+    # file is complete. So we show that file in "docker logs"
+    # (MASTER_LOG_TO_CONSOLE=false turns this off). It needs the plain file name,
+    # so it is not used when the log file name carries a time stamp.
+    MASTER_TAIL=0
+    if [ "$(norm_bool "${MASTER_LOG_CREATE:-true}")" = true ] \
+       && [ "$(norm_bool "${MASTER_LOG_TO_CONSOLE:-true}")" = true ] \
+       && [ "$(norm_bool "${MASTER_LOG_TIMESTAMP:-false}")" = false ]; then
+        MASTER_TAIL=1
+    fi
+    supervise "the master server" run_master
+    if [ "$MASTER_TAIL" = 1 ]; then
+        tail -n +1 -F "${MASTERDIR}/logfile.log" 2> /dev/null &
     fi
     sleep 3    # the original launcher also gives the master a head start
 else
