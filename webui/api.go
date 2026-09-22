@@ -15,11 +15,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-const version = "0.3.1"
+const version = "0.3.2"
 
 type App struct {
 	servers    []*Server
@@ -268,17 +267,23 @@ func (a *App) handlePower(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "restart":
-		if err := writeWant(a.control, s.ID, "run"); err != nil {
+		// Ask start.sh to stop it, wait until it actually has (it finds and
+		// force-kills the real game process itself -- see the comment on
+		// server_marker in start.sh, next to supervise_server), then ask it to
+		// start again. Letting start.sh do the killing avoids guessing at a
+		// process id here, which is not reliable for a Wine-hosted program.
+		if err := writeWant(a.control, s.ID, "stop"); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// Stop the running process. start.sh notices and starts it again after a few seconds.
-		// SIGKILL, not SIGTERM: Wine only ends one thread of the game on SIGTERM
-		// and leaves a half-dead server behind.
-		if b, err := os.ReadFile(filepath.Join(a.control, "pid-"+strconv.Itoa(s.ID))); err == nil {
-			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
-				syscall.Kill(pid, syscall.SIGKILL)
-			}
+		// Stopping the real game process normally takes about a second.
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) && s.State() != "stopped" {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if err := writeWant(a.control, s.ID, "run"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 	default:
 		writeErr(w, http.StatusBadRequest, "action must be start, stop or restart")

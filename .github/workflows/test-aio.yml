@@ -312,8 +312,10 @@ jobs:
           if [ "${fail}" != 0 ]; then
             echo "--------- diagnostics: control files inside the container"
             docker exec aio sh -c 'for f in /tmp/bfbc2-control/*; do echo "$f: $(cat "$f")"; done' || true
-            echo "--------- diagnostics: game server processes"
+            echo "--------- diagnostics: game server processes (real, matched by command line)"
             docker top aio -eo pid,stat,args | grep -E "Frost|bfbc2-webui" | cut -c1-160 || true
+            echo "--------- diagnostics: does the marker for server 3 match anything?"
+            docker exec aio sh -c "pgrep -af 'serverInstancePath instances/3/ '" || echo "(no match)"
             echo "--------- diagnostics: last container messages"
             docker logs --tail 15 aio 2>&1 | cut -c1-200
           fi

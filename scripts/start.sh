@@ -71,8 +71,9 @@ supervise() {
 # The web interface changes the want file.
 supervise_server() {
     local n=$1
+    local marker; marker=$(server_marker "$n")
     (
-        local want pid
+        local want pid i
         while [ ! -e "$STOPFLAG" ]; do
             want=$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null || echo run)
             if [ "$want" = stop ]; then
@@ -84,18 +85,32 @@ supervise_server() {
             run_server "$n" &
             pid=$!
             echo "$pid" > "$CONTROL_DIR/pid-${n}"
-            while kill -0 "$pid" 2> /dev/null; do
+
+            # Found in testing: real Wine does not always keep running as the
+            # very process we just started (it can hand off to another one
+            # internally), so that pid is not reliably the one holding the
+            # game's ports. Instead we find and watch the ACTUAL game process
+            # by matching its unique command line ("$marker").
+            i=0
+            while ! pgrep -f "$marker" > /dev/null 2>&1; do
+                i=$((i + 1))
+                if [ "$i" -ge 100 ]; then break; fi        # 10 seconds: give up waiting
+                kill -0 "$pid" 2> /dev/null || break        # it died before ever appearing
+                sleep 0.1
+            done
+
+            while pgrep -f "$marker" > /dev/null 2>&1; do
                 [ -e "$STOPFLAG" ] && break
                 if [ "$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null)" = stop ]; then
-                    # SIGKILL on purpose. Wine handles a polite SIGTERM by ending just one
-                    # thread of the game, which leaves a half-dead server behind
-                    # (found in testing). The other servers are not affected.
-                    pkill -KILL -P "$pid" 2> /dev/null
-                    kill -KILL "$pid" 2> /dev/null
+                    # SIGKILL, matched by command line (see the comment above).
+                    # A plain SIGTERM only ends one thread of the game and
+                    # leaves a half-dead server behind (found in testing).
+                    pkill -KILL -f "$marker" 2> /dev/null || true
                     break
                 fi
                 sleep 1
             done
+
             # "|| true" matters here: under "set -e", wait's exit status is the
             # killed process's status (non-zero), which would otherwise end this
             # whole supervisor right here -- silently, with no restart ever again.
@@ -122,6 +137,10 @@ run_master() {
     fi
 }
 
+# The exact text that identifies server <n>'s process on the command line,
+# used to find and stop the right one (see the big comment in supervise_server).
+server_marker() { printf 'serverInstancePath instances/%s/ ' "$1"; }
+
 run_server() {
     local n=$1
     local region hb mp2 extra
@@ -130,8 +149,6 @@ run_server() {
     mp2=$(setting "$n" MAPPACK2 1)
     extra=$(setting "$n" EXTRA_ARGS "")
     cd "$PACK_DIR"
-    # "exec" makes this process BE the game server (not its parent), so the
-    # process number we record is the right one to stop.
     # $extra is left unquoted on purpose: it may hold several arguments.
     # shellcheck disable=SC2086
     exec wine Frost.Game.Main_Win32_Final.exe \

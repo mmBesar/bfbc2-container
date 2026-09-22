@@ -6,9 +6,7 @@ package main
 import (
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -62,27 +60,49 @@ func TestPowerStartStop(t *testing.T) {
 	}
 }
 
-func TestPowerRestartStopsTheProcess(t *testing.T) {
+// Restart no longer kills a process directly (a captured pid is not reliable
+// for a Wine-hosted game -- see the comment on server_marker in start.sh). It
+// asks start.sh to stop the server (by writing "stop"), waits for start.sh to
+// report it stopped, and then asks it to run again. This test plays the part
+// of start.sh: it watches for "stop" and answers by setting state-1=stopped.
+func TestPowerRestartWaitsForStopThenAsksToRun(t *testing.T) {
 	ts, dir, _ := powerApp(t)
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Skip("cannot start a helper process")
-	}
-	defer cmd.Process.Kill()
-	os.WriteFile(filepath.Join(dir, "pid-1"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644)
+
+	stopSeen := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ {
+			if readFile(t, filepath.Join(dir, "want-1")) == "stop" {
+				os.WriteFile(filepath.Join(dir, "state-1"), []byte("stopped\n"), 0o644)
+				close(stopSeen)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
 
 	if resp, _ := do(t, "POST", ts.URL+"/api/servers/1/power", map[string]string{"action": "restart"}); resp.StatusCode != 200 {
 		t.Fatalf("restart: status %d", resp.StatusCode)
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
 	select {
-	case <-done: // the process ended, as start.sh would then notice
-	case <-time.After(3 * time.Second):
-		t.Error("the game server process was not stopped")
+	case <-stopSeen: // good: the handler asked start.sh to stop it
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart never asked to stop the server")
 	}
 	if got := readFile(t, filepath.Join(dir, "want-1")); got != "run" {
-		t.Errorf("after a restart the server must still be wanted running, got %q", got)
+		t.Errorf("after start.sh reports stopped, restart must ask to run again, got %q", got)
+	}
+}
+
+// If start.sh never reports the server as stopped, restart must not hang
+// forever -- it gives up after its own timeout and asks to run again anyway.
+func TestPowerRestartGivesUpIfNeverStopped(t *testing.T) {
+	ts, _, _ := powerApp(t)
+	start := time.Now()
+	if resp, _ := do(t, "POST", ts.URL+"/api/servers/1/power", map[string]string{"action": "restart"}); resp.StatusCode != 200 {
+		t.Fatalf("restart: status %d", resp.StatusCode)
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("restart took %s; it should give up well within its own timeout", elapsed)
 	}
 }
 
