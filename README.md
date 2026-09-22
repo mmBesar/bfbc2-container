@@ -114,9 +114,11 @@ and the password you set with `WEB_PASSWORD`).
 - **Players:** the live player list with **Kick**, **Ban** (permanent, until the
   round ends, or for a number of seconds), and moving a player to the other
   team or to a squad.
-- **Start, stop, restart:** switch a single game server on or off (to save CPU
-  and memory) or restart it. This lasts until the container restarts; after
-  that `SERVER_<n>_AUTOSTART` decides again.
+- **Start, stop, restart:** switch a game server on or off (to save CPU and
+  memory) with the button on its card in the server list, or restart it from its
+  detail view. "Start all stopped" and "Stop all" do it for every server. This
+  lasts until the container restarts; after that `SERVER_<n>_AUTOSTART` decides
+  again.
 - **Round & map:** next round, restart, end the round with a winner, and the
   server's map list.
 - **Settings:** switch hardcore, friendly fire, killcam and the others on or

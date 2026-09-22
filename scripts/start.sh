@@ -87,12 +87,19 @@ supervise_server() {
             while kill -0 "$pid" 2> /dev/null; do
                 [ -e "$STOPFLAG" ] && break
                 if [ "$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null)" = stop ]; then
-                    kill -TERM "$pid" 2> /dev/null
+                    # SIGKILL on purpose. Wine handles a polite SIGTERM by ending just one
+                    # thread of the game, which leaves a half-dead server behind
+                    # (found in testing). The other servers are not affected.
+                    pkill -KILL -P "$pid" 2> /dev/null
+                    kill -KILL "$pid" 2> /dev/null
                     break
                 fi
                 sleep 1
             done
-            wait "$pid" 2> /dev/null
+            # "|| true" matters here: under "set -e", wait's exit status is the
+            # killed process's status (non-zero), which would otherwise end this
+            # whole supervisor right here -- silently, with no restart ever again.
+            wait "$pid" 2> /dev/null || true
             rm -f "$CONTROL_DIR/pid-${n}"
             [ -e "$STOPFLAG" ] && break
             if [ "$(cat "$CONTROL_DIR/want-${n}" 2> /dev/null)" != stop ]; then

@@ -185,8 +185,13 @@ function renderCards() {
         ? [el("div", {}, mapLabel(info.map)),
            el("div", { class: "big" }, `${info.players}/${info.maxPlayers}`, el("small", {}, " players"))]
         : el("div", { class: "muted" }, stopped ? "Not running. Open it to start it." : (s.error || "waiting for the server...")),
-      el("div", { class: "muted small" }, `game port ${s.gamePort}`)));
+      el("div", { class: "card-foot" },
+        el("span", { class: "muted small" }, `game port ${s.gamePort}`),
+        stopped
+          ? el("button", { type: "button", class: "small", onclick: (e) => { e.stopPropagation(); startServer(s); } }, "Start")
+          : el("button", { type: "button", class: "small danger", onclick: (e) => { e.stopPropagation(); stopServer(s); } }, "Stop"))));
   }
+  $("#bulk").hidden = state.servers.length === 0;
 }
 
 // ---- one server ---------------------------------------------------------------
@@ -273,16 +278,32 @@ function renderPlayers(s) {
   }
 }
 
-// Sends a command to the selected server and reports the result.
-async function act(action, body, okMessage) {
+// Sends a command to one server and reports the result.
+async function actOn(id, action, body, okMessage) {
   try {
-    await api("POST", `/api/servers/${state.selected}/${action}`, body);
+    await api("POST", `/api/servers/${id}/${action}`, body);
     toast(okMessage);
     setTimeout(refresh, 700);
     return true;
   } catch (e) {
     toast(e.message, true);
     return false;
+  }
+}
+
+// The same, for the server that is open in the detail view.
+const act = (action, body, okMessage) => actOn(state.selected, action, body, okMessage);
+
+// Start or stop a server. Used by the buttons on the server list and in the detail view.
+function startServer(s) {
+  return actOn(s.id, "power", { action: "start" }, `Starting ${s.info ? s.info.name : "server " + s.id}...`);
+}
+
+function stopServer(s) {
+  const name = s.info ? s.info.name : `server ${s.id}`;
+  const players = s.info && s.info.players ? ` ${s.info.players} player(s) are on it.` : "";
+  if (confirm(`Stop ${name}?${players} They will be disconnected.`)) {
+    return actOn(s.id, "power", { action: "stop" }, `Stopping ${name}...`);
   }
 }
 
@@ -433,12 +454,22 @@ async function loadStatus() {
 
 // ---- start ---------------------------------------------------------------------------------
 
-$("#p-start").addEventListener("click", () => act("power", { action: "start" }, "Starting the server..."));
-$("#p-stop").addEventListener("click", () => {
-  if (confirm("Stop this server? Players on it will be disconnected.")) act("power", { action: "stop" }, "Stopping the server...");
-});
+$("#p-start").addEventListener("click", () => startServer(serverById(state.selected)));
+$("#p-stop").addEventListener("click", () => stopServer(serverById(state.selected)));
 $("#p-restart").addEventListener("click", () => {
   if (confirm("Restart this server? Players on it will be disconnected.")) act("power", { action: "restart" }, "Restarting the server...");
+});
+$("#bulk-start").addEventListener("click", async () => {
+  const stopped = state.servers.filter((s) => s.state === "stopped");
+  if (stopped.length === 0) return void toast("No server is stopped.");
+  for (const s of stopped) await startServer(s);
+});
+$("#bulk-stop").addEventListener("click", async () => {
+  const running = state.servers.filter((s) => s.state !== "stopped");
+  if (running.length === 0) return void toast("No server is running.");
+  const players = running.reduce((sum, s) => sum + (s.info ? s.info.players : 0), 0);
+  if (!confirm(`Stop ${running.length} server(s)? ${players} player(s) are on them. They will be disconnected.`)) return;
+  for (const s of running) await actOn(s.id, "power", { action: "stop" }, `Stopping ${s.info ? s.info.name : "server " + s.id}...`);
 });
 $("#back").addEventListener("click", back);
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => showTab(b.dataset.tab));

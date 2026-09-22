@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 type App struct {
 	servers    []*Server
@@ -273,9 +273,11 @@ func (a *App) handlePower(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Stop the running process. start.sh notices and starts it again after a few seconds.
+		// SIGKILL, not SIGTERM: Wine only ends one thread of the game on SIGTERM
+		// and leaves a half-dead server behind.
 		if b, err := os.ReadFile(filepath.Join(a.control, "pid-"+strconv.Itoa(s.ID))); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
-				syscall.Kill(pid, syscall.SIGTERM)
+				syscall.Kill(pid, syscall.SIGKILL)
 			}
 		}
 	default:
